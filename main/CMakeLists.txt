@@ -1,0 +1,15 @@
+idf_component_register(
+    SRCS
+        "app_main.cpp"
+        "control_task.cpp"
+    INCLUDE_DIRS
+        "."
+    REQUIRES
+        config
+        can_bus
+        rs02_motor
+        witmotion_imu
+        esp_timer
+        driver
+        log
+)

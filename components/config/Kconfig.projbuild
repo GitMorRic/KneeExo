@@ -1,0 +1,24 @@
+menu "KneeExo Application"
+
+    config KNEEEXO_CONTROL_HZ
+        int "Control loop frequency (Hz)"
+        default 100
+        range 50 1000
+        help
+            control_task 主循环频率。默认 100Hz（10ms 周期）。
+
+    config KNEEEXO_DEFAULT_KP
+        int "Default motion-mode Kp (x100)"
+        default 500
+        range 0 50000
+        help
+            运控模式默认 Kp，实际值 = 该数值 / 100。0 ~ 500。
+
+    config KNEEEXO_DEFAULT_KD
+        int "Default motion-mode Kd (x100)"
+        default 100
+        range 0 500
+        help
+            运控模式默认 Kd，实际值 = 该数值 / 100。0 ~ 5。
+
+endmenu
