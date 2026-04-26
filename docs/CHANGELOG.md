@@ -1,5 +1,66 @@
 # Changelog
 
+## [0.2.1] - 2026-04-26
+
+### Fixed
+
+- **IMU 引脚冲突 (GPIO41/42 → GPIO17/18)**：GPIO41 (JTAG MTDI) / GPIO42 (JTAG MTMS) 是
+  ESP32-S3 经典 JTAG 接口的专用引脚。ESP-IDF 固件启动时即使只用板载 USB-JTAG（GPIO19/20），
+  仍会把 GPIO39–42 预配置为 JTAG，导致 `uart: GPIO 42 is not usable, maybe used by others` 警告，
+  UART1 TX 无法正常发送，`raw_uart_probe` 返回 0 bytes。改用 GPIO17（TX）/ GPIO18（RX）后正常。
+- **IMU 波特率不匹配 (115200 → 9600)**：WitMotion WT-IMU63 出厂默认波特率为 9600 bps，非 115200。
+  `raw_uart_probe` 在 9600 baud 下检测到 `has 0x55`，在 115200 下字节乱码（first=0x00）；
+  将 `IMU_UART_BAUD` 改为 9600 后 CSV 数据流正常。
+- **IMU 5V 供电导致 UART 数据乱码**：WT-IMU63 用 5V 供电时，UART TX 输出为 5V 逻辑电平；
+  ESP32-S3 GPIO 最大输入电压 3.6V，高于此值时逻辑判断出错（字节被接收但 0x55 找不到）。
+  已改为 3.3V 供电。若需 5V 供电见下方 Known Issues。
+
+### Changed
+
+- `config.h` IMU 引脚更新：`PIN_IMU1_MCU_TX = GPIO17`，`PIN_IMU1_MCU_RX = GPIO18`；
+  `PIN_IMU2_MCU_TX = GPIO21`，`PIN_IMU2_MCU_RX = GPIO38`（同步规避 GPIO48 RGB LED 冲突）
+- `config.h` `IMU_UART_BAUD` 从 115200 改为 9600，注释说明出厂默认值及可上调路径
+
+### Known Issues
+
+- **IMU 5V 供电 + ESP32-S3 的电平兼容问题**：若需 5V 供电（指示灯更亮），需在
+  IMU TX → GPIO18（ESP32 RX）之间加分压电路：10kΩ 串联 + 20kΩ 对地，将 5V 降至 3.3V。
+  ESP32 TX (3.3V) → IMU RX 方向无需处理（5V TTL 门限 VIH=2.0V，3.3V 满足）。
+
+---
+
+## [0.2.0] - 2026-04-26
+
+### Added
+
+- **App profile 切换机制**：`Kconfig.projbuild` 加 `KNEEEXO_APP_PROFILE` 4 选 1
+  (`normal` / `twai_loopback` / `imu_only` / `motor_test`)，`main/app_main.cpp`
+  改为 dispatcher，4 个 profile 拆到 `main/profiles/profile_*.cpp`，每个文件
+  用 `#if CONFIG_KNEEEXO_APP_PROFILE_xxx` 包整文件，未选中时空 TU。
+- `main/profiles/profile_normal.cpp`：原 main 的形态（IMU + RS02 + 100Hz 控制循环），
+  全局 `g_motor` 句柄定义在此。
+- `main/profiles/profile_twai_loopback.cpp`：TWAI 自发自收 50 帧，验证 CAN 控制器。
+- `main/profiles/profile_imu_only.cpp`：仅 IMU，按 `KNEEEXO_IMU_CSV_HZ` 输出 CSV
+  (`$IMU,t_us,ax,ay,az,gx,gy,gz,roll,pitch,yaw,T`)，配合 PC 端实时绘图。
+- `main/profiles/profile_motor_test.cpp`：阶段 A 只读反馈 / 阶段 B（需手动开启
+  `KNEEEXO_PROFILE_MOTOR_TEST_AUTOSPIN`）±0.1rad 摆动，用于方向标定。
+- `tools/idf-shell.ps1`：dot-source 一键拉起 ESP-IDF v5.5.4 环境。
+- `tools/imu_plot.py`：PC 端 pyserial + matplotlib 实时绘图，配合 imu_only profile。
+- `tools/README.md`：上述脚本使用说明。
+- `config.h` 新增**关节 / IMU 安装方向标定常量** + `motor_to_joint_*`/`joint_to_motor_*`
+  辅助函数，统一上层只看膝关节坐标 (屈曲为正)。
+  - `JOINT_DIR_SIGN`、`JOINT_ZERO_OFFSET_RAD`、`KNEE_FLEX_LIMIT_RAD`、`KNEE_EXT_LIMIT_RAD`
+  - `IMU_THIGH_PITCH_AXIS`、`IMU_THIGH_PITCH_SIGN`
+  - 当前为占位默认值，待 motor_test profile 实测后改实。
+
+### Changed
+
+- `control_task.cpp` 改为通过 `joint_to_motor_*` 在关节 / 电机坐标之间换算，
+  日志同时打印 `thigh_pitch` 与 `joint pos (rad / deg)`。
+- `main/CMakeLists.txt` 加入 4 个 profile 源文件。
+- 验证 ESP-IDF v5.5.4 环境（安装路径 `D:\esp-idf\.espressif\v5.5.4\esp-idf`）：
+  4 个 profile 全部 `idf.py build` 通过。
+
 ## [0.1.1] - 2026-04-20
 
 ### Fixed

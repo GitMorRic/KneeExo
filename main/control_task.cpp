@@ -1,28 +1,36 @@
 // control_task.cpp
-// 100Hz 控制循环 demo：
-//   - 读取 IMU 最新数据 (俯仰角)
-//   - 读取电机反馈 (位置/速度/力矩/温度)
-//   - 下发温和的运控指令 (保持 0 位，小 Kp/Kd，0 力矩前馈)
-//   - 每 0.5s 打印一行日志
+// 100Hz 控制循环 demo（profile = normal 时启动）：
 //
-// 在实际膝外骨骼控制中，这里会替换为：
-//   - 从 IMU 估算大腿姿态 / 步态相位
-//   - 计算期望关节角度或前馈力矩
-//   - 调 rs02_motion_control 下发
+// 仅在 normal profile 下编译；其他 profile 不引用 g_motor。
+//   - 读取 IMU 最新数据
+//   - 读取电机反馈
+//   - 下发温和的运控指令 (保持关节 0 位，小 Kp/Kd，0 力矩前馈)
+//   - 每 0.5s 打印一行日志（关节坐标 + 大腿俯仰）
+//
+// 后续替换思路：
+//   1. 从 IMU 估算大腿姿态 / 步态相位
+//   2. 由相位机决定 (target_joint_pos, torque_ff)
+//   3. 经 joint_to_motor_rad/_torque 转回电机坐标，调 rs02_motion_control
+
+#include "sdkconfig.h"
+
+#if CONFIG_KNEEEXO_APP_PROFILE_NORMAL
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include <math.h>
 
 #include "config.h"
 #include "rs02_motor.h"
 #include "witmotion_imu.h"
 #include "app_main.hpp"
 
+using namespace ExoConfig;
+
 static const char *TAG = "control";
 
-// 默认刚度，可后续在 menuconfig 里调
 static constexpr float DEFAULT_KP = (float)CONFIG_KNEEEXO_DEFAULT_KP / 100.0f;
 static constexpr float DEFAULT_KD = (float)CONFIG_KNEEEXO_DEFAULT_KD / 100.0f;
 static constexpr int   LOOP_HZ    = CONFIG_KNEEEXO_CONTROL_HZ;
@@ -45,27 +53,35 @@ extern "C" void control_task(void *arg)
         witmotion_get_latest(&imu);
         rs02_get_feedback(&g_motor, &fb, 0);
 
-        // 控制律 demo：保持在 0 位，给一点点刚度 + 阻尼
-        const float target_pos = 0.0f;
-        const float target_vel = 0.0f;
-        const float torque_ff  = 0.0f;
+        // 控制律 demo：关节保持在 0 位（直腿），给一点点刚度 + 阻尼
+        const float target_joint_pos = 0.0f;
+        const float target_joint_vel = 0.0f;
+        const float joint_torque_ff  = 0.0f;
+
         rs02_motion_control(&g_motor,
-                            torque_ff,
-                            target_pos,
-                            target_vel,
+                            joint_to_motor_torque(joint_torque_ff),
+                            joint_to_motor_rad(target_joint_pos),
+                            joint_to_motor_vel(target_joint_vel),
                             DEFAULT_KP,
                             DEFAULT_KD);
 
         if ((loop_count++ % log_every) == 0) {
+            const float joint_pos = motor_to_joint_rad(fb.position_rad);
+            const float thigh_pitch =
+                IMU_THIGH_PITCH_SIGN * imu.euler_deg[IMU_THIGH_PITCH_AXIS];
             ESP_LOGI(TAG,
-                     "imu pitch=%+6.2f roll=%+6.2f yaw=%+6.2f | "
-                     "motor pos=%+6.3f vel=%+6.3f tq=%+5.2f T=%4.1f%s",
-                     imu.euler_deg[1], imu.euler_deg[0], imu.euler_deg[2],
-                     fb.position_rad, fb.velocity_rad_s,
-                     fb.torque_nm, fb.temperature_c,
+                     "thigh_pitch=%+6.2f deg | joint pos=%+6.3f rad (%+6.1f deg) "
+                     "vel=%+6.3f tq=%+5.2f T=%4.1f%s",
+                     thigh_pitch,
+                     joint_pos, joint_pos * 180.0f / (float)M_PI,
+                     motor_to_joint_vel(fb.velocity_rad_s),
+                     motor_to_joint_torque(fb.torque_nm),
+                     fb.temperature_c,
                      fb.has_fault ? " FAULT!" : "");
         }
 
         vTaskDelayUntil(&last_wake, period);
     }
 }
+
+#endif // CONFIG_KNEEEXO_APP_PROFILE_NORMAL

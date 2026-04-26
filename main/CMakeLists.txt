@@ -2,6 +2,10 @@ idf_component_register(
     SRCS
         "app_main.cpp"
         "control_task.cpp"
+        "profiles/profile_normal.cpp"
+        "profiles/profile_twai_loopback.cpp"
+        "profiles/profile_imu_only.cpp"
+        "profiles/profile_motor_test.cpp"
     INCLUDE_DIRS
         "."
     REQUIRES

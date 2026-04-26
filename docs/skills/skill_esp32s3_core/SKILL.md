@@ -1,4 +1,4 @@
----
+﻿---
 name: skill-esp32s3-core
 description: |
   ESP32-S3-N16R8 主控核心：GPIO/外设分配、ESP-IDF v5.5.4 构建指引。
@@ -25,10 +25,10 @@ metadata:
 |---|---|---|---|---|
 | GPIO43 | UART0 TX | OUT | 日志 / 下载 (`idf.py monitor`) | 固定，勿改 |
 | GPIO44 | UART0 RX | IN  | 日志 / 下载 | 固定，勿改 |
-| GPIO42 | UART1 TX | OUT | IMU1 MCU→IMU RX | JTAG MTMS，见下方说明 |
-| GPIO41 | UART1 RX | IN  | IMU1 IMU→MCU TX | JTAG MTDI，见下方说明 |
-| GPIO48 | UART2 TX | OUT | IMU2 MCU→IMU RX | DevKitC-1 板载 RGB LED，见下方说明 |
-| GPIO47 | UART2 RX | IN  | IMU2 IMU→MCU TX | — |
+| GPIO17 | UART1 TX | OUT | IMU1 MCU→IMU RX | 原 GPIO42(JTAG MTMS)，已换无冲突引脚 |
+| GPIO18 | UART1 RX | IN  | IMU1 IMU→MCU TX | 原 GPIO41(JTAG MTDI)，已换无冲突引脚 |
+| GPIO21 | UART2 TX | OUT | IMU2 MCU→IMU RX | 原 GPIO48(RGB LED)，已换 |
+| GPIO38 | UART2 RX | IN  | IMU2 IMU→MCU TX | — |
 | GPIO16 | TWAI TX  | OUT | CAN 收发器 TX | XTAL_32K_P（无外接晶振时可用） |
 | GPIO15 | TWAI RX  | IN  | CAN 收发器 RX | XTAL_32K_N（无外接晶振时可用） |
 | GPIO1  | ADC1_CH0 | IN  | 电池电压采样 | 外部 11:1 分压，注意：CH0 ≠ CH3 |

@@ -1,5 +1,52 @@
 menu "KneeExo Application"
 
+    choice KNEEEXO_APP_PROFILE
+        prompt "App profile (which firmware to build)"
+        default KNEEEXO_APP_PROFILE_NORMAL
+        help
+            选择当次构建烧入哪一个 demo / 主程序。
+            后续每次 idf.py menuconfig 切到不同 profile，再 build flash 即可。
+
+        config KNEEEXO_APP_PROFILE_NORMAL
+            bool "normal: IMU + RS02 motor + 100Hz control loop"
+            help
+                正式形态：上电 -> 初始化 IMU + CAN + 电机 -> 立即使能 -> 100Hz 阻抗控制。
+                ⚠ 上电后电机会立刻通电，请确认硬件、限位、急停就位。
+
+        config KNEEEXO_APP_PROFILE_TWAI_LOOPBACK
+            bool "twai_loopback: TWAI 自环自检 (最安全, 不接电机)"
+            help
+                ESP32 TWAI 控制器自发自收 50 帧。不需要接收发器或电机也能通过。
+                用来确认 CAN 控制器、波特率、引脚配置正确。
+
+        config KNEEEXO_APP_PROFILE_IMU_ONLY
+            bool "imu_only: 只跑 IMU + CSV over USB-CDC (PC 实时绘图)"
+            help
+                仅初始化 IMU1 (UART1)，按设定频率把 acc/gyro/euler 流式打到主串口。
+                每行以 $IMU, 开头，配套 tools/imu_plot.py 在 PC 端实时画图。
+
+        config KNEEEXO_APP_PROFILE_MOTOR_TEST
+            bool "motor_test: 电机使能 + 反馈 + 方向标定 (慎用)"
+            help
+                只接 CAN + 电机供电，不依赖 IMU。
+                默认只读反馈、不使能；勾选 KNEEEXO_PROFILE_MOTOR_TEST_AUTOSPIN 后才会
+                上电使能 + 给 ±0.1 rad 小幅摆动来标定方向。
+    endchoice
+
+    config KNEEEXO_PROFILE_MOTOR_TEST_AUTOSPIN
+        bool "motor_test: 上电后自动给 ±0.1 rad 小幅摆动 (用于标定方向)"
+        depends on KNEEEXO_APP_PROFILE_MOTOR_TEST
+        default n
+        help
+            建议第一次只读反馈、确认接线 OK，再开此项让电机轻轻动一下，
+            观察电机正向旋转对应屈膝还是伸膝，回头改 config.h 的 JOINT_DIR_SIGN。
+
+    config KNEEEXO_IMU_CSV_HZ
+        int "imu_only profile: CSV output rate (Hz)"
+        default 100
+        range 10 500
+        depends on KNEEEXO_APP_PROFILE_IMU_ONLY
+
     config KNEEEXO_CONTROL_HZ
         int "Control loop frequency (Hz)"
         default 100
