@@ -95,6 +95,127 @@ menu "KneeExo Application"
         help
             control_task 主循环频率。默认 100Hz（10ms 周期）。
 
+    choice KNEEEXO_WEAR_CONTROL_MODE
+        prompt "Wear control mode"
+        depends on KNEEEXO_APP_PROFILE_NORMAL
+        default KNEEEXO_WEAR_MODE_TRANSPARENT
+        help
+            穿戴调试模式。第一次穿戴必须先用 transparent，再尝试 damping。
+
+        config KNEEEXO_WEAR_MODE_TRANSPARENT
+            bool "transparent: 0 torque command, observe joint feedback"
+
+        config KNEEEXO_WEAR_MODE_DAMPING
+            bool "damping: resist joint velocity with small torque"
+
+        config KNEEEXO_WEAR_MODE_ASSIST
+            bool "assist: small velocity-follow assist + landing buffer"
+    endchoice
+
+    config KNEEEXO_USER_ZERO_CALIB_MS
+        int "wear: user zero calibration duration (ms)"
+        default 3000
+        range 0 10000
+        depends on KNEEEXO_APP_PROFILE_NORMAL
+        help
+            normal/wear profile 启动后，在电机使能前读取电机位置并平均。
+            穿戴者保持自然伸膝，该平均值作为本次穿戴 user zero。
+            0 表示跳过运行时用户零位标定。
+
+    config KNEEEXO_DAMPING_B_X100
+        int "damping: viscous damping coefficient (Nm/(rad/s) x100)"
+        default 30
+        range 0 300
+        depends on KNEEEXO_WEAR_MODE_DAMPING
+        help
+            阻尼力矩 tau = -B * joint_velocity。默认 0.30 Nm/(rad/s)。
+            第一次穿戴建议保持较小，确认不顶腿后再增大。
+
+    config KNEEEXO_DAMPING_MAX_TORQUE_X100
+        int "damping: torque clamp (Nm x100)"
+        default 80
+        range 10 300
+        depends on KNEEEXO_WEAR_MODE_DAMPING
+        help
+            阻尼模式最大输出力矩幅值。默认 0.80 Nm。
+
+    config KNEEEXO_ASSIST_FOLLOW_B_X100
+        int "assist: velocity-follow gain (Nm/(rad/s) x100)"
+        default 10
+        range 0 150
+        depends on KNEEEXO_WEAR_MODE_ASSIST
+        help
+            顺势助力 tau = +B * joint_velocity，属于负阻尼，必须很小。
+            默认 0.10 Nm/(rad/s)，只是让你感觉更轻一点，不用于正式助力。
+
+    config KNEEEXO_ASSIST_MAX_TORQUE_X100
+        int "assist: velocity-follow torque clamp (Nm x100)"
+        default 35
+        range 10 200
+        depends on KNEEEXO_WEAR_MODE_ASSIST
+
+    config KNEEEXO_ASSIST_VEL_DEADBAND_MRAD_S
+        int "assist: velocity deadband (mrad/s)"
+        default 120
+        range 0 1000
+        depends on KNEEEXO_WEAR_MODE_ASSIST
+        help
+            速度小于该阈值时不助力，避免站立时轻微抖动被放大。
+
+    config KNEEEXO_LANDING_BUFFER_B_X100
+        int "assist: landing buffer damping (Nm/(rad/s) x100)"
+        default 80
+        range 0 400
+        depends on KNEEEXO_WEAR_MODE_ASSIST
+        help
+            接近伸膝端且检测到膝盖快速屈曲时，施加反向阻尼作为落地缓冲。
+
+    config KNEEEXO_LANDING_BUFFER_MAX_TORQUE_X100
+        int "assist: landing buffer torque clamp (Nm x100)"
+        default 80
+        range 10 400
+        depends on KNEEEXO_WEAR_MODE_ASSIST
+
+    config KNEEEXO_LANDING_BUFFER_NEAR_EXT_MRAD
+        int "assist: landing buffer near-extension window (mrad)"
+        default 450
+        range 50 1500
+        depends on KNEEEXO_WEAR_MODE_ASSIST
+
+    config KNEEEXO_LANDING_BUFFER_MIN_FLEX_VEL_MRAD_S
+        int "assist: landing buffer minimum flexion velocity (mrad/s)"
+        default 350
+        range 50 3000
+        depends on KNEEEXO_WEAR_MODE_ASSIST
+
+    config KNEEEXO_GAIT_IMU_ENABLE
+        bool "experimental: enable IMU gait phase estimator (not used for torque yet)"
+        depends on KNEEEXO_APP_PROFILE_NORMAL
+        default n
+        help
+            先实现并打印 IMU 步态相位估计，但默认关闭，不参与控制。
+            后续可用 thigh pitch / pitch rate 识别 swing / stance。
+
+    config KNEEEXO_GAIT_IMPACT_SPIKE_X100
+        int "gait: landing impact spike threshold (g x100)"
+        default 18
+        range 5 300
+        depends on KNEEEXO_GAIT_IMU_ENABLE
+        help
+            acc_norm 的高通尖刺阈值。默认 0.18g。落地瞬间通常会出现明显加速度尖刺。
+
+    config KNEEEXO_GAIT_LANDING_COOLDOWN_MS
+        int "gait: landing event cooldown (ms)"
+        default 350
+        range 50 1500
+        depends on KNEEEXO_GAIT_IMU_ENABLE
+
+    config KNEEEXO_GAIT_SWING_RATE_DPS
+        int "gait: thigh pitch rate threshold for swing (deg/s)"
+        default 35
+        range 5 200
+        depends on KNEEEXO_GAIT_IMU_ENABLE
+
     config KNEEEXO_DEFAULT_KP
         int "Default motion-mode Kp (x100)"
         default 500

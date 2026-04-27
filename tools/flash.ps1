@@ -10,6 +10,11 @@
 #   imu        ->  KNEEEXO_APP_PROFILE_IMU_ONLY
 #   motor      ->  KNEEEXO_APP_PROFILE_MOTOR_TEST
 #   limit      ->  motor_test + KNEEEXO_PROFILE_MOTOR_LIMIT_CALIB
+#   wear       ->  normal + transparent + user-zero
+#   damp       ->  normal + damping + user-zero
+#   assist     ->  normal + small velocity-follow assist + landing buffer
+#   gait       ->  normal + transparent + IMU gait display
+#   assistgait -> normal + assist + IMU gait display
 #
 # 示例：
 #   .\tools\flash.ps1                      # 只 build（normal，上次用的 COM）
@@ -40,6 +45,14 @@ $profileMap = @{
     "motor"  = "KNEEEXO_APP_PROFILE_MOTOR_TEST"
     "limit"  = "KNEEEXO_APP_PROFILE_MOTOR_TEST"
     "calib"  = "KNEEEXO_APP_PROFILE_MOTOR_TEST"
+    "wear"   = "KNEEEXO_APP_PROFILE_NORMAL"
+    "transparent" = "KNEEEXO_APP_PROFILE_NORMAL"
+    "damp"   = "KNEEEXO_APP_PROFILE_NORMAL"
+    "damping" = "KNEEEXO_APP_PROFILE_NORMAL"
+    "assist" = "KNEEEXO_APP_PROFILE_NORMAL"
+    "follow" = "KNEEEXO_APP_PROFILE_NORMAL"
+    "gait" = "KNEEEXO_APP_PROFILE_NORMAL"
+    "assistgait" = "KNEEEXO_APP_PROFILE_NORMAL"
 }
 
 # action aliases
@@ -91,6 +104,59 @@ if ($Profile -ne "") {
         }.GetEnumerator()) {
             if ($content -notmatch "CONFIG_$($pair.Key)=") {
                 $content = $content -replace "(CONFIG_KNEEEXO_PROFILE_MOTOR_LIMIT_CALIB=y)", "`$1`nCONFIG_$($pair.Key)=$($pair.Value)"
+            }
+        }
+    }
+
+    # normal/wear 子模式：默认安全透明，damp/damping 才开启小阻尼
+    if ($key -eq "KNEEEXO_APP_PROFILE_NORMAL") {
+        foreach ($mode in @("KNEEEXO_WEAR_MODE_TRANSPARENT", "KNEEEXO_WEAR_MODE_DAMPING", "KNEEEXO_WEAR_MODE_ASSIST")) {
+            if ($content -match "CONFIG_${mode}=y") {
+                $content = $content -replace "(?m)^CONFIG_${mode}=y", "# CONFIG_${mode} is not set"
+            } elseif ($content -notmatch "CONFIG_${mode}") {
+                $content = $content -replace "(CONFIG_KNEEEXO_APP_PROFILE_NORMAL=y)", "`$1`n# CONFIG_${mode} is not set"
+            }
+        }
+
+        if ($Profile.ToLower() -in @("damp", "damping")) {
+            $content = $content -replace "# CONFIG_KNEEEXO_WEAR_MODE_DAMPING is not set", "CONFIG_KNEEEXO_WEAR_MODE_DAMPING=y"
+        } elseif ($Profile.ToLower() -in @("assist", "follow", "assistgait")) {
+            $content = $content -replace "# CONFIG_KNEEEXO_WEAR_MODE_ASSIST is not set", "CONFIG_KNEEEXO_WEAR_MODE_ASSIST=y"
+        } else {
+            $content = $content -replace "# CONFIG_KNEEEXO_WEAR_MODE_TRANSPARENT is not set", "CONFIG_KNEEEXO_WEAR_MODE_TRANSPARENT=y"
+        }
+
+        if ($Profile.ToLower() -in @("gait", "assistgait")) {
+            if ($content -match "CONFIG_KNEEEXO_GAIT_IMU_ENABLE=y") {
+                # already enabled
+            } elseif ($content -match "# CONFIG_KNEEEXO_GAIT_IMU_ENABLE is not set") {
+                $content = $content -replace "# CONFIG_KNEEEXO_GAIT_IMU_ENABLE is not set", "CONFIG_KNEEEXO_GAIT_IMU_ENABLE=y"
+            } else {
+                $content = $content -replace "(CONFIG_KNEEEXO_APP_PROFILE_NORMAL=y)", "`$1`nCONFIG_KNEEEXO_GAIT_IMU_ENABLE=y"
+            }
+        } else {
+            if ($content -match "CONFIG_KNEEEXO_GAIT_IMU_ENABLE=y") {
+                $content = $content -replace "(?m)^CONFIG_KNEEEXO_GAIT_IMU_ENABLE=y", "# CONFIG_KNEEEXO_GAIT_IMU_ENABLE is not set"
+            }
+        }
+
+        foreach ($pair in @{
+            "KNEEEXO_USER_ZERO_CALIB_MS" = "3000";
+            "KNEEEXO_DAMPING_B_X100" = "30";
+            "KNEEEXO_DAMPING_MAX_TORQUE_X100" = "80";
+            "KNEEEXO_ASSIST_FOLLOW_B_X100" = "10";
+            "KNEEEXO_ASSIST_MAX_TORQUE_X100" = "35";
+            "KNEEEXO_ASSIST_VEL_DEADBAND_MRAD_S" = "120";
+            "KNEEEXO_LANDING_BUFFER_B_X100" = "80";
+            "KNEEEXO_LANDING_BUFFER_MAX_TORQUE_X100" = "80";
+            "KNEEEXO_LANDING_BUFFER_NEAR_EXT_MRAD" = "450";
+            "KNEEEXO_LANDING_BUFFER_MIN_FLEX_VEL_MRAD_S" = "350";
+            "KNEEEXO_GAIT_IMPACT_SPIKE_X100" = "18";
+            "KNEEEXO_GAIT_LANDING_COOLDOWN_MS" = "350";
+            "KNEEEXO_GAIT_SWING_RATE_DPS" = "35";
+        }.GetEnumerator()) {
+            if ($content -notmatch "CONFIG_$($pair.Key)=") {
+                $content = $content -replace "(CONFIG_KNEEEXO_APP_PROFILE_NORMAL=y)", "`$1`nCONFIG_$($pair.Key)=$($pair.Value)"
             }
         }
     }

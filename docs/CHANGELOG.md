@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.2.1] - 2026-04-26
+## [0.2.1] - 2026-04-28
 
 ### Added
 
@@ -15,6 +15,25 @@
 - 限位标定检测逻辑调整：碰限位后不再只依赖“速度/位置完全停滞”，新增命令跟随误差判断，
   并在未严格判定成功时保留最大力矩处的候选限位，最后统一打印正/负限位候选值和
   `config.h` 填写提示。
+- **穿戴调试模式**：`normal` profile 新增运行时用户伸膝零位平均、透明模式和小阻尼模式。
+  `.\tools\flash.ps1 wear COMx` 进入 0 力矩透明模式，`.\tools\flash.ps1 damp COMx`
+  进入速度阻尼模式；两者均在电机使能前采样 `USER_ZERO`，并在控制循环中打印
+  `joint_user` / `joint_mech` / 命令力矩 / 反馈力矩。
+- **实验助力跟随模式**：新增 `.\tools\flash.ps1 assist COMx`，基于电机编码器速度给小幅顺势力矩，
+  并在接近伸膝端且检测到快速屈膝时叠加落地缓冲阻尼。该模式暂不依赖 IMU，所有力矩均受
+  软限位和力矩夹紧保护。
+- **IMU 步态识别占位**：新增 `KNEEEXO_GAIT_IMU_ENABLE` 实验开关和 IMU thigh pitch/rate
+  相位估计函数，默认关闭且不参与力矩控制，为后续 stance/swing 状态机预留。
+- **IMU 步态显示与落地尖刺检测**：新增 `.\tools\flash.ps1 gait COMx` 和
+  `.\tools\flash.ps1 assistgait COMx`，在日志中显示 `gait=stance/swing/landing`、
+  `acc_norm` 与 `impact`。`landing` 由加速度模长高通尖刺 + 冷却时间检测，先只显示，
+  不参与助力控制。
+- 优化 `landing` 可见性：检测到落地尖刺时即时打印 `GAIT landing spike`，并将
+  `landing` 状态保持约 250ms，避免 100Hz 瞬时事件被 0.5s 周期日志错过；默认尖刺阈值
+  从 0.35g 降到 0.18g，便于先观察事件。
+- 调低实验助力默认值：`assist` 速度跟随增益从 0.20 降到 0.10 Nm/(rad/s)，
+  助力力矩上限从 0.60 降到 0.35 Nm，落地缓冲上限从 1.20 降到 0.80 Nm，
+  减少滞后导致的过冲和“幅度太大”体感。
 
 ### Fixed
 
