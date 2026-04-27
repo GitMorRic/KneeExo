@@ -69,7 +69,7 @@ namespace ExoConfig{
     //    出厂 CAN_ID = 0x7F；本 MCU 主机 ID 可任意选 0x00~0xFE（不与电机 ID 重复）
     //    额定 6 Nm / 峰值 17 Nm；出轴最大 ~44 rad/s；减速比 7.75:1
     // =============================================================================
-    constexpr uint8_t     RS02_CAN_ID         = 0x7F;
+    constexpr uint8_t     RS02_CAN_ID         = 0x02;  // 实测扫描到的电机 ID（出厂非默认 0x7F）
     constexpr uint8_t     RS02_HOST_ID        = 0xFD;
 
     // 运控模式编解码范围（对应 float <-> uint16 线性映射）

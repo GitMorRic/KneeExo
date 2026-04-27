@@ -142,7 +142,12 @@ static void rx_task(void *arg)
         uint8_t type; uint16_t data; uint8_t target;
         unpack_ext_id(msg.identifier, &type, &data, &target);
 
-        uint8_t motor_id = (data >> 8) & 0xFF;
+        // 响应帧结构（RS02 协议）：
+        //   bit[28:24] = type
+        //   bit[23:16] = 故障/模式状态位（type-2）或 0x00（type-17）
+        //   bit[15:8]  = 电机自身 CAN_ID  ← data & 0xFF
+        //   bit[7:0]   = 目标（主机）CAN_ID
+        uint8_t motor_id = data & 0xFF;
 
         xSemaphoreTake(s_reg_mtx, portMAX_DELAY);
         rs02_handle_t *h = NULL;

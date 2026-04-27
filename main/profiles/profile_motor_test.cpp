@@ -35,6 +35,75 @@ using namespace ExoConfig;
 
 static const char *TAG = "profile.motor";
 
+// =============================================================================
+// CAN 总线扫描：在 rs02_init (启动 rx_task) 之前调用，监听所有帧。
+// 两阶段：
+//   Pass 1：先单独发给默认 ID 0x7F，快速确认是否直接通；
+//   Pass 2：若未找到，逐个扫描 0x01~0xFE（约 5s）。
+// =============================================================================
+static void scan_motor_ids(void)
+{
+    // --- 构造 type-17 读参数帧 (read mech_pos) ---
+    auto make_req = [](twai_message_t *req, uint8_t motor_id) {
+        memset(req, 0, sizeof(*req));
+        req->extd = 1;
+        req->data_length_code = 8;
+        // make_ext_id(17, host_id, motor_id)
+        req->identifier = ((uint32_t)(17u & 0x1Fu) << 24)
+                        | ((uint32_t)RS02_HOST_ID   << 8)
+                        | (uint32_t)motor_id;
+        req->data[0] = RS02_IDX_MECH_POS & 0xFF;
+        req->data[1] = (RS02_IDX_MECH_POS >> 8) & 0xFF;
+    };
+
+    // --- 收到一帧：尝试提取电机 ID 并打印 ---
+    auto report_frame = [](const twai_message_t *r, uint8_t queried_id) -> uint8_t {
+        if (!r->extd) return 0;
+        uint8_t resp_type   = (r->identifier >> 24) & 0x1Fu;
+        // RS02 响应帧：bit[15:8] = 电机自身 CAN_ID，bit[7:0] = 主机 CAN_ID
+        uint8_t resp_motor  = (r->identifier >> 8) & 0xFFu;
+        uint8_t resp_target = r->identifier & 0xFFu;
+        ESP_LOGI("can.scan",
+                 "[FOUND] queried=0x%02X → frame_id=0x%08X  type=%d  motor_id=0x%02X  target=0x%02X",
+                 queried_id, r->identifier, resp_type, resp_motor, resp_target);
+        return resp_motor;
+    };
+
+    // --- Pass 1：默认 ID 0x7F ---
+    ESP_LOGI("can.scan", "=== CAN 电机扫描 Pass-1: 探测默认 ID 0x7F ===");
+    twai_message_t req, resp;
+    make_req(&req, 0x7Fu);
+    can_bus_tx(&req, pdMS_TO_TICKS(10));
+    if (can_bus_rx(&resp, pdMS_TO_TICKS(100)) == ESP_OK) {
+        report_frame(&resp, 0x7Fu);
+        ESP_LOGI("can.scan", "Pass-1 成功！默认 ID 0x7F 有响应，跳过 Pass-2。");
+        return;
+    }
+    ESP_LOGW("can.scan", "Pass-1 未收到回应 → 开始 Pass-2 全范围扫描 (约5s)…");
+
+    // --- Pass 2：扫描 0x01~0xFE ---
+    ESP_LOGI("can.scan", "=== CAN 电机扫描 Pass-2: 逐ID探测 0x01-0xFE ===");
+    int found = 0;
+    for (uint16_t id = 1; id <= 0xFEu; id++) {
+        make_req(&req, (uint8_t)id);
+        can_bus_tx(&req, pdMS_TO_TICKS(5));
+        if (can_bus_rx(&resp, pdMS_TO_TICKS(15)) == ESP_OK) {
+            uint8_t mid = report_frame(&resp, (uint8_t)id);
+            (void)mid;
+            found++;
+        }
+    }
+    if (found == 0) {
+        ESP_LOGW("can.scan", "!! 全范围扫描未发现电机，请检查：");
+        ESP_LOGW("can.scan", "   1) 电机 24~60V 主电是否已上电？");
+        ESP_LOGW("can.scan", "   2) CANH/CANL 是否已从收发器连到电机？");
+        ESP_LOGW("can.scan", "   3) 电机端 CANH-CANL 之间是否有 120Ω 终端电阻？");
+        ESP_LOGW("can.scan", "   4) CAN 收发器 3.3V 供电是否正常？");
+    } else {
+        ESP_LOGI("can.scan", "=== Pass-2 共发现 %d 台电机 ===", found);
+    }
+}
+
 static void log_feedback(const char *tag_extra, const rs02_feedback_t *fb)
 {
     const float joint_rad = motor_to_joint_rad(fb->position_rad);
@@ -51,6 +120,9 @@ static void log_feedback(const char *tag_extra, const rs02_feedback_t *fb)
 extern "C" void profile_motor_test_main(void)
 {
     ESP_ERROR_CHECK(can_bus_init(PIN_TWAI_TX, PIN_TWAI_RX, CAN_BITRATE_HZ));
+
+    // 扫描必须在 rs02_init 之前：rx_task 启动后会独占所有收帧
+    scan_motor_ids();
 
     static rs02_handle_t m;
     ESP_ERROR_CHECK(rs02_init(&m, RS02_CAN_ID, RS02_HOST_ID));
