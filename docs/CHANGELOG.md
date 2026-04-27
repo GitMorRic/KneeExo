@@ -2,6 +2,20 @@
 
 ## [0.2.1] - 2026-04-26
 
+### Added
+
+- **悬空机械限位标定模式**：新增 `KNEEEXO_PROFILE_MOTOR_LIMIT_CALIB`，可通过
+  `.\tools\flash.ps1 limit COMx` 启用。该模式仅限离体悬空机构使用，电机会低速向负/正两个方向
+  搜索机械限位，用力矩升高、速度停滞、位置变化很小、持续时间共同判定碰限位，并打印
+  `JOINT_DIR_SIGN`、`JOINT_ZERO_OFFSET_RAD`、`KNEE_EXT_LIMIT_RAD`、`KNEE_FLEX_LIMIT_RAD`
+  的两组候选写法。
+- `Kconfig.projbuild` 新增限位标定参数：`KNEEEXO_LIMIT_CALIB_TORQUE_X100`、
+  `KNEEEXO_LIMIT_CALIB_SPEED_MRAD_S`、`KNEEEXO_LIMIT_CALIB_MAX_TRAVEL_MRAD`、
+  `KNEEEXO_LIMIT_CALIB_HOLD_MS`，方便根据机构重量、摩擦和限位强度调整。
+- 限位标定检测逻辑调整：碰限位后不再只依赖“速度/位置完全停滞”，新增命令跟随误差判断，
+  并在未严格判定成功时保留最大力矩处的候选限位，最后统一打印正/负限位候选值和
+  `config.h` 填写提示。
+
 ### Fixed
 
 - **IMU 引脚冲突 (GPIO41/42 → GPIO17/18)**：GPIO41 (JTAG MTDI) / GPIO42 (JTAG MTMS) 是

@@ -9,6 +9,7 @@
 #   twai       ->  KNEEEXO_APP_PROFILE_TWAI_LOOPBACK
 #   imu        ->  KNEEEXO_APP_PROFILE_IMU_ONLY
 #   motor      ->  KNEEEXO_APP_PROFILE_MOTOR_TEST
+#   limit      ->  motor_test + KNEEEXO_PROFILE_MOTOR_LIMIT_CALIB
 #
 # 示例：
 #   .\tools\flash.ps1                      # 只 build（normal，上次用的 COM）
@@ -37,6 +38,8 @@ $profileMap = @{
     "twai"   = "KNEEEXO_APP_PROFILE_TWAI_LOOPBACK"
     "imu"    = "KNEEEXO_APP_PROFILE_IMU_ONLY"
     "motor"  = "KNEEEXO_APP_PROFILE_MOTOR_TEST"
+    "limit"  = "KNEEEXO_APP_PROFILE_MOTOR_TEST"
+    "calib"  = "KNEEEXO_APP_PROFILE_MOTOR_TEST"
 }
 
 # action aliases
@@ -68,6 +71,29 @@ if ($Profile -ne "") {
 
     # 只启用目标 key
     $content = $content -replace "# CONFIG_${key} is not set", "CONFIG_${key}=y"
+
+    # motor 子模式默认全部关闭，避免误触发电机动作
+    foreach ($sub in @("KNEEEXO_PROFILE_MOTOR_TEST_AUTOSPIN", "KNEEEXO_PROFILE_MOTOR_LIMIT_CALIB")) {
+        if ($content -match "CONFIG_${sub}=y") {
+            $content = $content -replace "(?m)^CONFIG_${sub}=y", "# CONFIG_${sub} is not set"
+        } elseif ($content -notmatch "CONFIG_${sub}") {
+            $content = $content -replace "(CONFIG_KNEEEXO_APP_PROFILE_MOTOR_TEST=y)", "`$1`n# CONFIG_${sub} is not set"
+        }
+    }
+
+    if ($Profile.ToLower() -in @("limit", "calib")) {
+        $content = $content -replace "# CONFIG_KNEEEXO_PROFILE_MOTOR_LIMIT_CALIB is not set", "CONFIG_KNEEEXO_PROFILE_MOTOR_LIMIT_CALIB=y"
+        foreach ($pair in @{
+            "KNEEEXO_LIMIT_CALIB_TORQUE_X100" = "120";
+            "KNEEEXO_LIMIT_CALIB_SPEED_MRAD_S" = "120";
+            "KNEEEXO_LIMIT_CALIB_MAX_TRAVEL_MRAD" = "2500";
+            "KNEEEXO_LIMIT_CALIB_HOLD_MS" = "350";
+        }.GetEnumerator()) {
+            if ($content -notmatch "CONFIG_$($pair.Key)=") {
+                $content = $content -replace "(CONFIG_KNEEEXO_PROFILE_MOTOR_LIMIT_CALIB=y)", "`$1`nCONFIG_$($pair.Key)=$($pair.Value)"
+            }
+        }
+    }
 
     # imu_only profile 额外确保 IMU_CSV_HZ 出现
     if ($key -eq "KNEEEXO_APP_PROFILE_IMU_ONLY") {

@@ -41,6 +41,47 @@ menu "KneeExo Application"
             建议第一次只读反馈、确认接线 OK，再开此项让电机轻轻动一下，
             观察电机正向旋转对应屈膝还是伸膝，回头改 config.h 的 JOINT_DIR_SIGN。
 
+    config KNEEEXO_PROFILE_MOTOR_LIMIT_CALIB
+        bool "motor_test: 悬空自动寻找机械限位 (危险, 仅离体)"
+        depends on KNEEEXO_APP_PROFILE_MOTOR_TEST
+        default n
+        help
+            仅在电机/膝关节机构悬空且无人穿戴时使用。电机会低速向两个方向
+            搜索机械限位，根据力矩升高 + 速度停滞 + 位置变化很小判断碰到限位，
+            最后打印建议写入 config.h 的零位/限位参数。
+
+    config KNEEEXO_LIMIT_CALIB_TORQUE_X100
+        int "limit_calib: 碰限位力矩阈值 (Nm x100)"
+        default 80
+        range 20 600
+        depends on KNEEEXO_PROFILE_MOTOR_LIMIT_CALIB
+        help
+            实际阈值 = 该数值 / 100。默认 0.80 Nm。若机构自重/摩擦较大，
+            可以适当增大；若限位较脆弱，应减小。
+
+    config KNEEEXO_LIMIT_CALIB_SPEED_MRAD_S
+        int "limit_calib: 搜索速度 (mrad/s)"
+        default 120
+        range 20 500
+        depends on KNEEEXO_PROFILE_MOTOR_LIMIT_CALIB
+        help
+            位置命令爬坡速度。默认 120 mrad/s = 0.12 rad/s，较慢。
+
+    config KNEEEXO_LIMIT_CALIB_MAX_TRAVEL_MRAD
+        int "limit_calib: 单方向最大搜索行程 (mrad)"
+        default 2500
+        range 200 8000
+        depends on KNEEEXO_PROFILE_MOTOR_LIMIT_CALIB
+        help
+            从起点出发单方向最多搜索多少机械弧度。默认 2.5 rad，防止方向错
+            或限位未安装时一直转。
+
+    config KNEEEXO_LIMIT_CALIB_HOLD_MS
+        int "limit_calib: 碰限位条件持续时间 (ms)"
+        default 200
+        range 100 1500
+        depends on KNEEEXO_PROFILE_MOTOR_LIMIT_CALIB
+
     config KNEEEXO_IMU_CSV_HZ
         int "imu_only profile: CSV output rate (Hz)"
         default 100

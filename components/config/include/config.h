@@ -104,6 +104,13 @@ namespace ExoConfig{
     //      - 电机定子固定在大腿外侧支架，输出轴朝身体内侧、连接小腿；
     //      - IMU1 装大腿外侧 PCB（用 IMU1：UART1 / GPIO17-18）。
     //
+    //    注意区分两套坐标：
+    //      motor_pos_rad  是 RS02 返回的电机原始机械坐标，数值可正可负；
+    //      joint_angle_rad 是本工程统一使用的膝关节坐标：
+    //        joint_angle_rad = 0      表示伸膝/直腿；
+    //        joint_angle_rad > 0      表示屈膝；
+    //        KNEE_*_LIMIT_RAD 也都是 joint 坐标，不是 motor 原始坐标。
+    //
     //    映射公式：
     //      joint_angle_rad     = JOINT_DIR_SIGN * (motor_pos_rad - JOINT_ZERO_OFFSET_RAD)
     //      joint_velocity_rad  = JOINT_DIR_SIGN * motor_velocity_rad
@@ -111,22 +118,29 @@ namespace ExoConfig{
     //
     //    JOINT_DIR_SIGN  - +1：电机正向旋转 (motor_pos +) ⇒ 屈膝；
     //                      -1：电机正向旋转 (motor_pos +) ⇒ 伸膝。
-    //    JOINT_ZERO_OFFSET_RAD - 直腿姿态下电机的机械位置 (rad)。
+    //    JOINT_ZERO_OFFSET_RAD - 直腿/伸膝机械限位处的 motor_pos_rad。
     //
-    //    ⚠ 这两个值必须用 motor_test profile 实测后改实！下方为占位默认值。
+    //    当前实测 v0.2.1：
+    //      - POS 方向是伸膝/直腿端：motor_pos ≈ +1.74678 rad；
+    //      - NEG 方向是屈膝端：motor_pos ≈ -0.83608 rad；
+    //      - 因此 JOINT_DIR_SIGN = -1，把 motor 正方向映射为 joint 负方向；
+    //      - 伸膝端在 joint 坐标中定义为 0，屈膝最大约 2.58 rad，留 0.05 rad 余量。
+    //
+    //    ⚠ 这些值是机械装配级标定。用户穿戴后的绑带/腿型偏移应另做运行时 user zero，
+    //       不要反复改这里的机械基准。
     //    标定步骤见 docs/skills/skill_rs02_motor/SKILL.md §10 与 README。
     //
     //    安全限位（软件保护）：
-    //      KNEE_FLEX_LIMIT_RAD：屈膝最大角度 (默认 120°)
-    //      KNEE_EXT_LIMIT_RAD ：伸膝最大角度，负值表示防超伸 (默认 -5°)
+    //      KNEE_FLEX_LIMIT_RAD：joint 坐标下的屈膝最大角度
+    //      KNEE_EXT_LIMIT_RAD ：joint 坐标下的伸膝/防超伸边界；0 表示不允许超过机械直腿端
     // =============================================================================
     enum class LegSide : uint8_t { Right = 0, Left = 1 };
     constexpr LegSide LEG_SIDE                = LegSide::Right;
 
-    constexpr float   JOINT_DIR_SIGN          = +1.0f;     // ⚠ 待标定
-    constexpr float   JOINT_ZERO_OFFSET_RAD   = 0.0f;      // ⚠ 待标定
-    constexpr float   KNEE_FLEX_LIMIT_RAD     = 2.094f;    // 120°
-    constexpr float   KNEE_EXT_LIMIT_RAD      = -0.087f;   // -5°（防超伸）
+    constexpr float   JOINT_DIR_SIGN          = -1.0f;     // motor_pos 增大 => 伸膝；joint 屈膝为正
+    constexpr float   JOINT_ZERO_OFFSET_RAD   = +1.74678f; // motor 原始坐标：伸膝/直腿端
+    constexpr float   KNEE_FLEX_LIMIT_RAD     = 2.53286f;  // joint 坐标：屈膝端，已留 0.05 rad 余量
+    constexpr float   KNEE_EXT_LIMIT_RAD      = 0.0f;      // joint 坐标：伸膝端，不允许继续超伸
 
     // 关节坐标 <-> 电机坐标 转换
     inline float motor_to_joint_rad   (float motor_pos)    { return JOINT_DIR_SIGN * (motor_pos - JOINT_ZERO_OFFSET_RAD); }
