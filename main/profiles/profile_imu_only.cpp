@@ -1,5 +1,5 @@
 // profile_imu_only.cpp
-// 只跑 IMU1 (UART1)，按 KNEEEXO_IMU_CSV_HZ 频率把数据以 CSV 流到主串口 (UART0/USB-CDC)，
+// 只跑小腿 IMU 通道（当前为 IMU2/UART2），按 KNEEEXO_IMU_CSV_HZ 频率把数据以 CSV 流到主串口 (UART0/USB-CDC)，
 // 配合 PC 端 tools/imu_plot.py 做实时绘图。
 //
 // CSV 行格式（始终以 $IMU, 开头，方便 PC 端用正则筛选）：
@@ -45,7 +45,7 @@ static void raw_uart_probe(void)
     const int baud_count = 3;
 
     ESP_LOGW(TAG, "=== RAW UART PROBE START (GPIO TX=%d RX=%d) ===",
-             (int)PIN_IMU1_MCU_TX, (int)PIN_IMU1_MCU_RX);
+             (int)PIN_SHANK_IMU_MCU_TX, (int)PIN_SHANK_IMU_MCU_RX);
 
     for (int bi = 0; bi < baud_count; bi++) {
         int baud = bauds[bi];
@@ -59,11 +59,11 @@ static void raw_uart_probe(void)
         cfg.flow_ctrl  = UART_HW_FLOWCTRL_DISABLE;
         cfg.source_clk = UART_SCLK_DEFAULT;
 
-        uart_driver_install(IMU1_UART_NUM, 512, 0, 0, NULL, 0);
-        uart_param_config(IMU1_UART_NUM, &cfg);
-        uart_set_pin(IMU1_UART_NUM, PIN_IMU1_MCU_TX, PIN_IMU1_MCU_RX,
+        uart_driver_install(SHANK_IMU_UART_NUM, 512, 0, 0, NULL, 0);
+        uart_param_config(SHANK_IMU_UART_NUM, &cfg);
+        uart_set_pin(SHANK_IMU_UART_NUM, PIN_SHANK_IMU_MCU_TX, PIN_SHANK_IMU_MCU_RX,
                      UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-        uart_flush(IMU1_UART_NUM);
+        uart_flush(SHANK_IMU_UART_NUM);
 
         // 等待 1.5 秒收字节
         const int WAIT_MS = 1500;
@@ -74,7 +74,7 @@ static void raw_uart_probe(void)
         int64_t t_end = esp_timer_get_time() + WAIT_MS * 1000LL;
 
         while (esp_timer_get_time() < t_end) {
-            int n = uart_read_bytes(IMU1_UART_NUM, buf, sizeof(buf), pdMS_TO_TICKS(50));
+            int n = uart_read_bytes(SHANK_IMU_UART_NUM, buf, sizeof(buf), pdMS_TO_TICKS(50));
             if (n > 0) {
                 if (total == 0) first_byte = buf[0];
                 total += n;
@@ -92,7 +92,7 @@ static void raw_uart_probe(void)
             ESP_LOGW(TAG, "  baud=%-7d → %d bytes, first=0x%02X, no 0x55  (wrong baud?)", baud, total, first_byte);
         }
 
-        uart_driver_delete(IMU1_UART_NUM);
+        uart_driver_delete(SHANK_IMU_UART_NUM);
         vTaskDelay(pdMS_TO_TICKS(50));
     }
 
@@ -105,13 +105,13 @@ extern "C" void profile_imu_only_main(void)
     raw_uart_probe();
 
     // ------ 正式初始化 ------
-    ESP_ERROR_CHECK(witmotion_init(IMU1_UART_NUM,
-                                   PIN_IMU1_MCU_TX,
-                                   PIN_IMU1_MCU_RX,
+    ESP_ERROR_CHECK(witmotion_init(SHANK_IMU_UART_NUM,
+                                   PIN_SHANK_IMU_MCU_TX,
+                                   PIN_SHANK_IMU_MCU_RX,
                                    IMU_UART_BAUD));
 
     ESP_LOGI(TAG, "waiting for first IMU frame on UART%d (TX=%d RX=%d, %d bps)...",
-             (int)IMU1_UART_NUM, (int)PIN_IMU1_MCU_TX, (int)PIN_IMU1_MCU_RX, IMU_UART_BAUD);
+             (int)SHANK_IMU_UART_NUM, (int)PIN_SHANK_IMU_MCU_TX, (int)PIN_SHANK_IMU_MCU_RX, IMU_UART_BAUD);
 
     // 最多等 10 秒，超时报错继续（避免永久卡死）
     for (int i = 0; i < 100 && !witmotion_is_alive(); i++) {

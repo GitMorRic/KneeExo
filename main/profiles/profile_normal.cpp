@@ -73,9 +73,9 @@ extern "C" void profile_normal_main(void)
 {
     ESP_ERROR_CHECK(can_bus_init(PIN_TWAI_TX, PIN_TWAI_RX, CAN_BITRATE_HZ));
 
-    ESP_ERROR_CHECK(witmotion_init(IMU1_UART_NUM,
-                                   PIN_IMU1_MCU_TX,
-                                   PIN_IMU1_MCU_RX,
+    ESP_ERROR_CHECK(witmotion_init(SHANK_IMU_UART_NUM,
+                                   PIN_SHANK_IMU_MCU_TX,
+                                   PIN_SHANK_IMU_MCU_RX,
                                    IMU_UART_BAUD));
 
     ESP_ERROR_CHECK(rs02_init(&g_motor, RS02_CAN_ID, RS02_HOST_ID));

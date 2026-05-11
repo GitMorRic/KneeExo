@@ -55,6 +55,13 @@ namespace ExoConfig{
     constexpr uart_port_t IMU2_UART_NUM       = UART_NUM_2;
     constexpr int         IMU_UART_BAUD       = 9600;   // WitMotion 出厂默认；可通过上位机软件改至 115200
 
+    // 语义通道分配：
+    //   IMU1 = 大腿预留通道（当前可不供电、不初始化）
+    //   IMU2 = 小腿主动控制通道（当前 normal / imu_only profile 使用它）
+    constexpr uart_port_t SHANK_IMU_UART_NUM  = IMU2_UART_NUM;
+    constexpr gpio_num_t  PIN_SHANK_IMU_MCU_TX = PIN_IMU2_MCU_TX;
+    constexpr gpio_num_t  PIN_SHANK_IMU_MCU_RX = PIN_IMU2_MCU_RX;
+
     // =============================================================================
     // 3. CAN 总线 (TWAI) — 1 Mbps，连接至 CAN 电平 <-> TTL 收发器模块
     //    GPIO15 / GPIO16 为 32kHz 晶振引脚（XTAL_32K_N / XTAL_32K_P），
@@ -161,7 +168,36 @@ namespace ExoConfig{
     //
     //    ⚠ 同样需要标定：人静坐 -> 大腿前抬 30° -> 看哪个角度变化最大、方向是否对。
     // =============================================================================
-    constexpr int     IMU_THIGH_PITCH_AXIS    = 1;          // ⚠ 待标定（默认 Pitch）
-    constexpr float   IMU_THIGH_PITCH_SIGN    = +1.0f;      // ⚠ 待标定
+    constexpr int     IMU_THIGH_PITCH_AXIS    = 1;          // 兼容旧代码：大腿 pitch 轴
+    constexpr float   IMU_THIGH_PITCH_SIGN    = +1.0f;      // 兼容旧代码：大腿 pitch 符号
+
+    // v0.3 起推荐把 IMU 安装在小腿杆上，控制层统一使用人体语义坐标：
+    //   shank_pitch_rad > 0：右/左腿均表示小腿向前摆；
+    //   shank_pitch_rad < 0：右/左腿均表示小腿向后摆。
+    // 左腿上线时只改 axis/sign 与 motor_dir 标定，控制公式不区分左右腿。
+    constexpr int     IMU_SHANK_PITCH_AXIS    = 1;          // 0=Roll/X, 1=Pitch/Y, 2=Yaw/Z
+    constexpr float   IMU_SHANK_PITCH_SIGN    = +1.0f;      // 小腿向前摆时 shank_pitch 必须变大
+
+    // =============================================================================
+    // 8. 小腿杆重力补偿（辨识后写入）
+    //
+    //    模型：
+    //      tau_link = G * sin(shank_pitch_rad + phi) + bias
+    //      tau_ff   = -tau_link
+    //
+    //    G = m * GRAVITY * l_com，单位 Nm；phi 是 IMU/杆件安装角偏置；bias 是小偏置。
+    //    标定程序的角度采样点必须从 KNEE_EXT_LIMIT_RAD ~ KNEE_FLEX_LIMIT_RAD 的安全范围生成，
+    //    不允许使用固定角度硬扫。
+    // =============================================================================
+    constexpr float   GRAVITY                 = 9.81f;
+    constexpr bool    SHANK_GRAVITY_COMP_ENABLE = true;
+    constexpr float   SHANK_GRAVITY_G_NM      = 0.0f;       // 待辨识
+    constexpr float   SHANK_GRAVITY_PHI_RAD   = 0.0f;       // 待辨识
+    constexpr float   SHANK_GRAVITY_BIAS_NM   = 0.0f;       // 待辨识
+    constexpr float   SHANK_GRAVITY_MAX_NM    = 3.0f;       // 开发期前馈限幅
+
+    // 根据当前机械限位生成重力辨识目标点。输出是 joint 坐标（屈膝为正），且带安全 margin。
+    constexpr int     GRAVITY_ID_POINT_COUNT  = 7;
+    constexpr float   GRAVITY_ID_MARGIN_RAD   = 0.12f;
 
 } // namespace ExoConfig
