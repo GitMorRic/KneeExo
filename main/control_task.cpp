@@ -58,12 +58,13 @@ static float          g_gravity_G_nm = SHANK_GRAVITY_G_NM;
 static float          g_gravity_phi_rad = SHANK_GRAVITY_PHI_RAD;
 static float          g_gravity_bias_nm = SHANK_GRAVITY_BIAS_NM;
 static bool           g_gravity_enabled = SHANK_GRAVITY_COMP_ENABLE;
-static bool           g_state_impedance_enabled =
-#if CONFIG_KNEEEXO_GAIT_IMU_ENABLE
-    true;
-#else
-    false;
-#endif
+static bool           g_state_impedance_enabled = true;
+static bool           g_state_lock_enabled = false;
+static uint8_t        g_state_lock_id = 0;
+static float          g_landing_impact_thresh_g =
+    (float)CONFIG_KNEEEXO_GAIT_IMPACT_SPIKE_X100 / 100.0f;
+static float          g_swing_rate_thresh_dps =
+    (float)CONFIG_KNEEEXO_GAIT_SWING_RATE_DPS;
 static bool           g_params_loaded = false;
 
 static void load_runtime_params_once(void)
@@ -84,16 +85,22 @@ static void load_runtime_params_once(void)
     nvs_get_blob(h, "grav_phi", &g_gravity_phi_rad, &len);
     len = sizeof(float);
     nvs_get_blob(h, "grav_bias", &g_gravity_bias_nm, &len);
+    len = sizeof(float);
+    nvs_get_blob(h, "impact_th", &g_landing_impact_thresh_g, &len);
+    len = sizeof(float);
+    nvs_get_blob(h, "swing_th", &g_swing_rate_thresh_dps, &len);
     uint8_t en = g_gravity_enabled ? 1 : 0;
     nvs_get_u8(h, "grav_en", &en);
     g_gravity_enabled = en != 0;
     nvs_close(h);
-    ESP_LOGI(TAG, "runtime params: imu_zero=%.3f deg, G=%.4f phi=%.4f bias=%.4f en=%d",
+    ESP_LOGI(TAG, "runtime params: imu_zero=%.3f deg, G=%.4f phi=%.4f bias=%.4f en=%d impact=%.3fg swing=%.1fdps",
              g_shank_pitch_zero_deg,
              g_gravity_G_nm,
              g_gravity_phi_rad,
              g_gravity_bias_nm,
-             g_gravity_enabled ? 1 : 0);
+             g_gravity_enabled ? 1 : 0,
+             g_landing_impact_thresh_g,
+             g_swing_rate_thresh_dps);
 }
 
 static esp_err_t save_runtime_params(void)
@@ -105,6 +112,8 @@ static esp_err_t save_runtime_params(void)
     if (err == ESP_OK) err = nvs_set_blob(h, "grav_G", &g_gravity_G_nm, sizeof(float));
     if (err == ESP_OK) err = nvs_set_blob(h, "grav_phi", &g_gravity_phi_rad, sizeof(float));
     if (err == ESP_OK) err = nvs_set_blob(h, "grav_bias", &g_gravity_bias_nm, sizeof(float));
+    if (err == ESP_OK) err = nvs_set_blob(h, "impact_th", &g_landing_impact_thresh_g, sizeof(float));
+    if (err == ESP_OK) err = nvs_set_blob(h, "swing_th", &g_swing_rate_thresh_dps, sizeof(float));
     if (err == ESP_OK) err = nvs_set_u8(h, "grav_en", g_gravity_enabled ? 1 : 0);
     if (err == ESP_OK) err = nvs_commit(h);
     nvs_close(h);
@@ -133,6 +142,26 @@ static const char *exo_state_name(ExoState state)
     }
 }
 
+static bool parse_exo_state(const char *name, ExoState *out)
+{
+    if (strcmp(name, "SAFE") == 0) {
+        *out = ExoState::SafePassive;
+    } else if (strcmp(name, "IDS") == 0) {
+        *out = ExoState::InitialDoubleSupport;
+    } else if (strcmp(name, "SINGLE") == 0) {
+        *out = ExoState::SingleSupport;
+    } else if (strcmp(name, "ISWING") == 0) {
+        *out = ExoState::InitialSwing;
+    } else if (strcmp(name, "MSWING") == 0) {
+        *out = ExoState::MidSwing;
+    } else if (strcmp(name, "TSWING") == 0) {
+        *out = ExoState::TerminalSwing;
+    } else {
+        return false;
+    }
+    return true;
+}
+
 struct MotionFeatures {
     bool imu_alive = false;
     bool motor_alive = false;
@@ -146,6 +175,7 @@ struct MotionFeatures {
     float shank_pitch_deg = 0.0f;
     float shank_pitch_rate_dps = 0.0f;
     float shank_pitch_rate_lp_dps = 0.0f;
+    float prev_shank_pitch_rate_lp_dps = 0.0f;
     float knee_angle_rad = 0.0f;
     float knee_vel_rad_s = 0.0f;
     float knee_vel_lp_rad_s = 0.0f;
@@ -165,9 +195,9 @@ static inline float gravity_comp_torque(float shank_pitch_rad)
     if (!g_gravity_enabled) {
         return 0.0f;
     }
-    const float link_torque = g_gravity_G_nm * sinf(shank_pitch_rad + g_gravity_phi_rad)
-                            + g_gravity_bias_nm;
-    return clamp_float(-link_torque, -SHANK_GRAVITY_MAX_NM, SHANK_GRAVITY_MAX_NM);
+    const float compensation_torque = g_gravity_G_nm * sinf(shank_pitch_rad + g_gravity_phi_rad)
+                                    + g_gravity_bias_nm;
+    return clamp_float(compensation_torque, -SHANK_GRAVITY_MAX_NM, SHANK_GRAVITY_MAX_NM);
 }
 
 static void log_gravity_id_points(void)
@@ -205,6 +235,7 @@ static MotionFeatures update_features(const witmotion_data_t &imu,
     static int landing_cooldown_loops = 0;
     const float prev_knee_vel_lp = f.knee_vel_lp_rad_s;
     const float prev_shank_pitch = f.shank_pitch_deg;
+    const float prev_shank_rate_lp = f.shank_pitch_rate_lp_dps;
 
     f.imu_alive = imu_ok && imu.ts_us > 0;
     f.motor_alive = motor_ok && fb.ts_us > 0;
@@ -221,6 +252,7 @@ static MotionFeatures update_features(const witmotion_data_t &imu,
         IMU_SHANK_PITCH_SIGN * imu.gyro_dps[IMU_SHANK_PITCH_AXIS];
     f.shank_pitch_rate_lp_dps =
         0.75f * f.shank_pitch_rate_lp_dps + 0.25f * f.shank_pitch_rate_dps;
+    f.prev_shank_pitch_rate_lp_dps = prev_shank_rate_lp;
     f.acc_norm_g = sqrtf(imu.accel_g[0] * imu.accel_g[0]
                        + imu.accel_g[1] * imu.accel_g[1]
                        + imu.accel_g[2] * imu.accel_g[2]);
@@ -233,14 +265,13 @@ static MotionFeatures update_features(const witmotion_data_t &imu,
         landing_cooldown_loops--;
     }
 
-    const float impact_thresh = (float)CONFIG_KNEEEXO_GAIT_IMPACT_SPIKE_X100 / 100.0f;
-    const bool knee_flexing_fast = f.knee_vel_lp_rad_s > 0.45f;
+    const bool knee_motion_plausible = fabsf(f.knee_vel_lp_rad_s) < 4.0f;
     const bool knee_angle_reasonable = f.knee_angle_rad > -0.05f
-                                    && f.knee_angle_rad < 0.75f;
-    const bool shank_reasonable = f.shank_pitch_deg > -45.0f
-                               && f.shank_pitch_deg < 45.0f;
-    f.landing_event = f.impact_g > impact_thresh
-                   && knee_flexing_fast
+                                    && f.knee_angle_rad < 1.65f;
+    const bool shank_reasonable = f.shank_pitch_deg > -85.0f
+                               && f.shank_pitch_deg < 75.0f;
+    f.landing_event = f.impact_g > g_landing_impact_thresh_g
+                   && knee_motion_plausible
                    && knee_angle_reasonable
                    && shank_reasonable
                    && landing_cooldown_loops == 0;
@@ -249,9 +280,12 @@ static MotionFeatures update_features(const witmotion_data_t &imu,
         landing_cooldown_loops = cooldown_loops > 1 ? cooldown_loops : 1;
     }
 
-    f.knee_flexion_peak = prev_knee_vel_lp > 0.10f
-                       && f.knee_vel_lp_rad_s <= -0.05f
-                       && f.knee_angle_rad > 0.45f;
+    f.knee_flexion_peak = (prev_knee_vel_lp > 0.10f
+                        && f.knee_vel_lp_rad_s <= -0.05f
+                        && f.knee_angle_rad > 0.45f)
+                       || (prev_shank_rate_lp < -8.0f
+                        && f.shank_pitch_rate_lp_dps >= 3.0f
+                        && f.shank_pitch_deg < -8.0f);
     f.shank_vertical_cross = prev_shank_pitch < 0.0f
                           && f.shank_pitch_deg >= 0.0f;
     return f;
@@ -286,18 +320,28 @@ static void update_state_machine(StateMachine &sm, const MotionFeatures &f)
         return;
     }
 
-    const int timeout_safe = LOOP_HZ * 3;
+    if (g_state_lock_enabled) {
+        transition_to(sm, static_cast<ExoState>(g_state_lock_id), "manual state lock");
+        return;
+    }
+
     const int timeout_stance = LOOP_HZ * 2;
     const int timeout_swing = LOOP_HZ * 3 / 10; // 300ms
-    const bool swing_like = f.knee_vel_lp_rad_s > 0.35f
-                         && f.shank_pitch_rate_lp_dps > (float)CONFIG_KNEEEXO_GAIT_SWING_RATE_DPS;
+    const bool backward_swing = f.shank_pitch_rate_lp_dps < -g_swing_rate_thresh_dps
+                             && f.shank_pitch_deg < -6.0f;
+    const bool knee_flexing = f.knee_vel_lp_rad_s > 0.18f
+                           && f.knee_angle_rad < 1.25f;
+    const bool swing_like = backward_swing || knee_flexing;
+    const bool terminal_swing_like = f.shank_pitch_rate_lp_dps > 0.35f * g_swing_rate_thresh_dps
+                                  && f.knee_vel_lp_rad_s < -0.08f
+                                  && f.knee_angle_rad < 0.75f;
 
     switch (sm.state) {
     case ExoState::SafePassive:
         if (f.landing_event) {
             sm.good_cycles = sm.good_cycles < 2 ? sm.good_cycles + 1 : sm.good_cycles;
             transition_to(sm, ExoState::InitialDoubleSupport, "trusted landing");
-        } else if (sm.loops_in_state > timeout_safe && swing_like) {
+        } else if (swing_like) {
             transition_to(sm, ExoState::InitialSwing, "safe observed swing");
         }
         break;
@@ -308,7 +352,7 @@ static void update_state_machine(StateMachine &sm, const MotionFeatures &f)
         } else if (f.knee_angle_rad > 0.12f && fabsf(f.knee_vel_lp_rad_s) < 0.25f) {
             transition_to(sm, ExoState::SingleSupport, "knee loaded/stable");
         } else if (sm.loops_in_state > LOOP_HZ / 2) {
-            transition_to(sm, ExoState::SingleSupport, "IDS timeout");
+            transition_to(sm, ExoState::SafePassive, "IDS timeout guard");
         }
         break;
 
@@ -326,19 +370,19 @@ static void update_state_machine(StateMachine &sm, const MotionFeatures &f)
         if (f.landing_event) {
             transition_to(sm, ExoState::InitialDoubleSupport, "landing during initial swing");
         } else if (f.knee_flexion_peak) {
-            transition_to(sm, ExoState::MidSwing, "knee flexion peak");
+            transition_to(sm, ExoState::MidSwing, "swing reversal/flexion peak");
         } else if (sm.loops_in_state > timeout_swing) {
-            transition_to(sm, ExoState::MidSwing, "initial swing timeout");
+            transition_to(sm, ExoState::SafePassive, "initial swing timeout guard");
         }
         break;
 
     case ExoState::MidSwing:
         if (f.landing_event) {
             transition_to(sm, ExoState::InitialDoubleSupport, "landing during mid swing");
-        } else if (f.shank_vertical_cross || f.knee_vel_lp_rad_s < -0.25f) {
-            transition_to(sm, ExoState::TerminalSwing, "shank vertical/extension");
+        } else if (terminal_swing_like || f.shank_vertical_cross) {
+            transition_to(sm, ExoState::TerminalSwing, "extension/forward swing");
         } else if (sm.loops_in_state > timeout_swing) {
-            transition_to(sm, ExoState::TerminalSwing, "mid swing timeout");
+            transition_to(sm, ExoState::SafePassive, "mid swing timeout guard");
         }
         break;
 
@@ -367,20 +411,20 @@ static ImpedanceParams params_for_state(ExoState state, int loops_in_state)
     (void)loops_in_state;
     switch (state) {
     case ExoState::InitialDoubleSupport:
-        return {8.0f, 1.4f, 8.0f * DEG_TO_RAD, 0.0f, 1.2f};
+        return {2.5f, 0.45f, 8.0f * DEG_TO_RAD, 0.0f, 0.45f};
     case ExoState::SingleSupport:
-        return {14.0f, 1.6f, 10.0f * DEG_TO_RAD, 0.0f, 1.5f};
+        return {3.5f, 0.35f, 10.0f * DEG_TO_RAD, 0.0f, 0.50f};
     case ExoState::InitialSwing:
-        return {1.5f, 0.25f, 45.0f * DEG_TO_RAD, 0.15f, 0.8f};
+        return {2.5f, 0.10f, 60.0f * DEG_TO_RAD, 0.10f, 0.65f};
     case ExoState::MidSwing:
-        return {0.0f, 0.08f, 0.0f, 0.0f, 0.4f};
+        return {0.0f, 0.03f, 0.0f, 0.0f, 0.25f};
     case ExoState::TerminalSwing: {
         const float a = clamp_float((float)loops_in_state / (float)(LOOP_HZ * 3 / 10), 0.0f, 1.0f);
-        return {17.0f, 0.6f + 3.0f * a, 3.0f * DEG_TO_RAD, 0.0f, 1.0f};
+        return {2.0f, 0.35f + 0.65f * a, 3.0f * DEG_TO_RAD, 0.0f, 0.55f};
     }
     case ExoState::SafePassive:
     default:
-        return {0.0f, 0.08f, 0.0f, 0.0f, 0.4f};
+        return {0.0f, 0.04f, 0.0f, 0.0f, 0.25f};
     }
 }
 
@@ -413,6 +457,7 @@ extern "C" void control_task(void *arg)
     witmotion_data_t  shank_imu{};
     rs02_feedback_t   fb{};
     StateMachine sm{};
+    float joint_torque_cmd_filtered = 0.0f;
 
     load_runtime_params_once();
     log_gravity_id_points();
@@ -520,8 +565,14 @@ extern "C" void control_task(void *arg)
             joint_torque_ff = 0.0f;
         }
 
+        const float max_torque_step = 2.0f / (float)LOOP_HZ; // Nm per control tick.
+        const float torque_delta = clamp_float(joint_torque_ff - joint_torque_cmd_filtered,
+                                               -max_torque_step,
+                                               max_torque_step);
+        joint_torque_cmd_filtered += torque_delta;
+
         rs02_motion_control(&g_motor,
-                            joint_to_motor_torque(joint_torque_ff),
+                            joint_to_motor_torque(joint_torque_cmd_filtered),
                             fb.position_rad,
                             0.0f,
                             0.0f,
@@ -537,7 +588,7 @@ extern "C" void control_task(void *arg)
                      joint_user_pos, joint_user_pos * RAD_TO_DEG,
                      joint_mech_pos,
                      joint_vel,
-                     joint_torque_ff,
+                     joint_torque_cmd_filtered,
                      joint_gravity_ff,
                      joint_impedance_torque,
                      motor_to_joint_torque(fb.torque_nm),
@@ -568,7 +619,7 @@ extern "C" void control_task(void *arg)
                    joint_vel,
                    joint_gravity_ff,
                    joint_impedance_torque,
-                   joint_torque_ff,
+                   joint_torque_cmd_filtered,
                    motor_to_joint_torque(fb.torque_nm),
                    ip.k_nm_per_rad,
                    ip.b_nm_s_per_rad,
@@ -642,18 +693,54 @@ extern "C" void command_task(void *arg)
             }
         } else if (strncmp(cmd, "GRAV_ENABLE,", 12) == 0) {
             g_gravity_enabled = atoi(cmd + 12) != 0;
-            printf("$ACK,GRAV_ENABLE,%d\n", g_gravity_enabled ? 1 : 0);
+            printf("$ACK,GRAV_ENABLE,%d,G=%.6f,phi=%.6f,bias=%.6f\n",
+                   g_gravity_enabled ? 1 : 0,
+                   g_gravity_G_nm,
+                   g_gravity_phi_rad,
+                   g_gravity_bias_nm);
         } else if (strncmp(cmd, "STATE_CTRL,", 11) == 0) {
             g_state_impedance_enabled = atoi(cmd + 11) != 0;
             printf("$ACK,STATE_CTRL,%d\n", g_state_impedance_enabled ? 1 : 0);
+        } else if (strncmp(cmd, "STATE_LOCK,", 11) == 0) {
+            const char *arg_state = cmd + 11;
+            if (strcmp(arg_state, "OFF") == 0 || strcmp(arg_state, "AUTO") == 0) {
+                g_state_lock_enabled = false;
+                printf("$ACK,STATE_LOCK,OFF\n");
+            } else {
+                ExoState requested = ExoState::SafePassive;
+                if (parse_exo_state(arg_state, &requested)) {
+                    g_state_lock_id = static_cast<uint8_t>(requested);
+                    g_state_lock_enabled = true;
+                    printf("$ACK,STATE_LOCK,%s\n", exo_state_name(requested));
+                } else {
+                    printf("$ERR,STATE_LOCK,unknown\n");
+                }
+            }
+        } else if (strncmp(cmd, "SET_THRESH,", 11) == 0) {
+            float impact = 0.0f;
+            float swing = 0.0f;
+            if (sscanf(cmd + 11, "%f,%f", &impact, &swing) == 2
+                && impact >= 0.02f && impact <= 2.0f
+                && swing >= 5.0f && swing <= 250.0f) {
+                g_landing_impact_thresh_g = impact;
+                g_swing_rate_thresh_dps = swing;
+                printf("$ACK,SET_THRESH,%.4f,%.2f\n",
+                       g_landing_impact_thresh_g,
+                       g_swing_rate_thresh_dps);
+            } else {
+                printf("$ERR,SET_THRESH,parse_or_range\n");
+            }
         } else if (strcmp(cmd, "GET_PARAMS") == 0) {
-            printf("$ACK,PARAMS,imu_zero=%.6f,G=%.6f,phi=%.6f,bias=%.6f,grav_en=%d,state_ctrl=%d\n",
+            printf("$ACK,PARAMS,imu_zero=%.6f,G=%.6f,phi=%.6f,bias=%.6f,grav_en=%d,state_ctrl=%d,state_lock=%d,impact=%.6f,swing=%.3f\n",
                    g_shank_pitch_zero_deg,
                    g_gravity_G_nm,
                    g_gravity_phi_rad,
                    g_gravity_bias_nm,
                    g_gravity_enabled ? 1 : 0,
-                   g_state_impedance_enabled ? 1 : 0);
+                   g_state_impedance_enabled ? 1 : 0,
+                   g_state_lock_enabled ? 1 : 0,
+                   g_landing_impact_thresh_g,
+                   g_swing_rate_thresh_dps);
         } else {
             printf("$ERR,UNKNOWN,%s\n", cmd);
         }

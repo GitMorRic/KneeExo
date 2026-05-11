@@ -37,6 +37,7 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 from matplotlib.widgets import Button
 from matplotlib.widgets import CheckButtons
+from matplotlib.widgets import SpanSelector
 from matplotlib.widgets import TextBox
 import serial
 import serial.tools.list_ports
@@ -110,6 +111,9 @@ class TelemetryBuffer:
         self.markers: list[tuple[float, str]] = []
         self.gravity_samples: list[tuple[float, float]] = []
         self.latest_grav_fit: tuple[float, float, float, float] | None = None
+        self.selection: tuple[float, float, str] | None = None
+        self.latest_thresh_fit: tuple[float, float] | None = None
+        self.control_line = "commands: ready"
         self.frames = 0
         self.last_line = ""
 
@@ -157,6 +161,53 @@ class TelemetryBuffer:
     def clear_markers(self) -> None:
         with self.lock:
             self.markers.clear()
+
+    def set_control_line(self, line: str) -> None:
+        with self.lock:
+            self.control_line = line[-180:]
+
+    def set_selection(self, t0: float, t1: float, label: str = "selected") -> None:
+        if t1 < t0:
+            t0, t1 = t1, t0
+        with self.lock:
+            self.selection = (t0, t1, label)
+
+    def fit_thresholds_from_selection(self) -> tuple[float, float, dict[str, float]] | None:
+        with self.lock:
+            if self.selection is None or not self.t:
+                return None
+            t0_rel, t1_rel, _label = self.selection
+            base = self.t[0]
+            rows = []
+            for i, abs_t in enumerate(self.t):
+                tr = abs_t - base
+                if t0_rel <= tr <= t1_rel:
+                    rows.append(i)
+            acc = [self.v["acc_g"][i] for i in rows if self.v["acc_g"][i] == self.v["acc_g"][i]]
+            shank_rate = [self.v["shank_rate_dps"][i] for i in rows if self.v["shank_rate_dps"][i] == self.v["shank_rate_dps"][i]]
+        if len(acc) < 2:
+            return None
+        acc_sorted = sorted(acc)
+        baseline = acc_sorted[len(acc_sorted) // 2]
+        peak = max(acc)
+        impact = max(0.02, peak - baseline)
+        impact_thresh = max(0.05, 0.55 * impact)
+        if shank_rate:
+            swing_abs = sorted(abs(x) for x in shank_rate)
+            rate_peak = swing_abs[-1]
+            swing_thresh = min(250.0, max(5.0, 0.45 * rate_peak))
+        else:
+            rate_peak = float("nan")
+            swing_thresh = 35.0
+        impact_thresh = min(2.0, impact_thresh)
+        with self.lock:
+            self.latest_thresh_fit = (impact_thresh, swing_thresh)
+        return impact_thresh, swing_thresh, {
+            "acc_baseline": baseline,
+            "acc_peak": peak,
+            "impact_peak": impact,
+            "rate_peak": rate_peak,
+        }
 
     def latest_value(self, name: str) -> float:
         with self.lock:
@@ -245,6 +296,8 @@ class TelemetryBuffer:
                 {name: list(values) for name, values in self.v.items()},
                 list(self.state),
                 list(self.markers),
+                self.selection,
+                self.control_line,
                 self.frames,
                 self.last_line,
             )
@@ -299,6 +352,9 @@ def reader(ser: serial.Serial, buf: TelemetryBuffer, stop: threading.Event, writ
             buf.push_exo(exo)
             if writer:
                 writer.writerow({"type": "EXO", **exo})
+            continue
+        if line.startswith("$ACK") or line.startswith("$ERR"):
+            buf.set_control_line(line)
 
 
 def rel_time(t: list[float]) -> list[float]:
@@ -360,8 +416,8 @@ def main() -> None:
     th.start()
 
     plt.rcParams.update({"font.size": 9})
-    fig = plt.figure(figsize=(13.5, 8.8))
-    fig.subplots_adjust(bottom=0.12, top=0.92, right=0.82)
+    fig = plt.figure(figsize=(14.5, 9.2))
+    fig.subplots_adjust(bottom=0.18, top=0.92, right=0.68)
     gs = fig.add_gridspec(4, 2, width_ratios=[5.2, 1.45], hspace=0.35)
     axes = [fig.add_subplot(gs[i, 0]) for i in range(4)]
     panel = fig.add_subplot(gs[:, 1])
@@ -386,7 +442,7 @@ def main() -> None:
     }
     imu_zero = {"offset": 0.0, "set": False}
     labels = list(selected.keys())
-    checks_ax = fig.add_axes([0.855, 0.16, 0.125, 0.72])
+    checks_ax = fig.add_axes([0.865, 0.16, 0.12, 0.72])
     checks = CheckButtons(checks_ax, labels, [selected[x] for x in labels])
 
     def toggle(label: str) -> None:
@@ -420,6 +476,11 @@ def main() -> None:
 
     def btn_state_off(_event) -> None:
         send_cmd("$CMD,STATE_CTRL,0")
+
+    def lock_state(name: str):
+        def _cb(_event) -> None:
+            send_cmd(f"$CMD,STATE_LOCK,{name}")
+        return _cb
 
     def btn_grav_sample(_event) -> None:
         sample = buf.add_gravity_sample()
@@ -486,6 +547,28 @@ def main() -> None:
         buf.clear_gravity_samples()
         cmd_status["text"] = "gravity samples cleared"
 
+    def btn_thresh_fit(_event) -> None:
+        fit = buf.fit_thresholds_from_selection()
+        if fit is None:
+            cmd_status["text"] = "threshold fit failed: drag-select impact/swing window first"
+            return
+        impact, swing, stats = fit
+        impact_box.set_val(f"{impact:.3f}")
+        swing_box.set_val(f"{swing:.1f}")
+        cmd_status["text"] = (
+            f"T fit impact={impact:.3f}g swing={swing:.1f}dps "
+            f"(acc_peak={stats['acc_peak']:.2f}g, base={stats['acc_baseline']:.2f}g)"
+        )
+
+    def btn_thresh_send(_event) -> None:
+        try:
+            impact = float(impact_box.text)
+            swing = float(swing_box.text)
+        except ValueError:
+            cmd_status["text"] = "threshold parse failed"
+            return
+        send_cmd(f"$CMD,SET_THRESH,{impact:.6f},{swing:.3f}")
+
     button_defs = [
         ("Zero IMU", btn_zero_imu),
         ("Zero Motor", btn_zero_motor),
@@ -493,6 +576,13 @@ def main() -> None:
         ("SAFE off", btn_safe_off),
         ("State on", btn_state_on),
         ("State off", btn_state_off),
+        ("Auto FSM", lock_state("OFF")),
+        ("Lock SAFE", lock_state("SAFE")),
+        ("Lock IDS", lock_state("IDS")),
+        ("Lock SINGLE", lock_state("SINGLE")),
+        ("Lock ISW", lock_state("ISWING")),
+        ("Lock MSW", lock_state("MSWING")),
+        ("Lock TSW", lock_state("TSWING")),
         ("G sample", btn_grav_sample),
         ("G fit", btn_grav_fit),
         ("G send", btn_grav_send),
@@ -501,21 +591,29 @@ def main() -> None:
         ("G apply", btn_grav_apply_manual),
         ("Save params", btn_save_params),
         ("Report", btn_export_report),
+        ("T fit", btn_thresh_fit),
+        ("T send", btn_thresh_send),
         ("G clear", btn_grav_clear),
     ]
     buttons = []
     for i, (label, cb) in enumerate(button_defs):
-        axb = fig.add_axes([0.70, 0.885 - i * 0.036, 0.11, 0.028])
+        col = i % 2
+        row = i // 2
+        axb = fig.add_axes([0.695 + col * 0.079, 0.885 - row * 0.037, 0.072, 0.028])
         b = Button(axb, label)
         b.on_clicked(cb)
         buttons.append(b)
 
-    grav_G_ax = fig.add_axes([0.70, 0.095, 0.11, 0.026])
-    grav_phi_ax = fig.add_axes([0.70, 0.062, 0.11, 0.026])
-    grav_bias_ax = fig.add_axes([0.70, 0.029, 0.11, 0.026])
+    grav_G_ax = fig.add_axes([0.695, 0.135, 0.075, 0.026])
+    grav_phi_ax = fig.add_axes([0.695, 0.102, 0.075, 0.026])
+    grav_bias_ax = fig.add_axes([0.695, 0.069, 0.075, 0.026])
     grav_G_box = TextBox(grav_G_ax, "G", initial="0.0")
     grav_phi_box = TextBox(grav_phi_ax, "phi", initial="0.0")
     grav_bias_box = TextBox(grav_bias_ax, "bias", initial="0.0")
+    impact_ax = fig.add_axes([0.785, 0.135, 0.075, 0.026])
+    swing_ax = fig.add_axes([0.785, 0.102, 0.075, 0.026])
+    impact_box = TextBox(impact_ax, "impact", initial="0.18")
+    swing_box = TextBox(swing_ax, "swing", initial="35.0")
 
     def on_key(event) -> None:
         mapping = {
@@ -529,7 +627,7 @@ def main() -> None:
         if event.key in mapping:
             buf.mark(mapping[event.key])
         elif event.key == "z":
-            t_raw, values, _states, _markers, _frames, _last_line = buf.snapshot()
+            t_raw, values, _states, _markers, _selection, _control_line, _frames, _last_line = buf.snapshot()
             vals = values.get(args.shank_axis, [])
             current = next((v for v in reversed(vals) if v == v), None)
             if current is not None:
@@ -543,12 +641,24 @@ def main() -> None:
 
     fig.canvas.mpl_connect("key_press_event", on_key)
 
-    latest_text = fig.text(0.02, 0.055, "", fontsize=9, family="monospace")
-    command_text = fig.text(0.02, 0.026, "", fontsize=9, family="monospace", color="tab:blue")
-    state_text = fig.text(0.70, 0.005, "", fontsize=8.5, family="monospace", color="tab:purple")
+    def on_select(xmin: float, xmax: float) -> None:
+        buf.set_selection(xmin, xmax, "selected")
+        cmd_status["text"] = f"selected {xmin:.2f}-{xmax:.2f}s; click T fit to estimate thresholds"
+
+    span_selectors = [
+        SpanSelector(ax, on_select, "horizontal", useblit=True,
+                     props=dict(alpha=0.18, facecolor="tab:orange"),
+                     interactive=True)
+        for ax in axes
+    ]
+    _keep_span_selectors_alive = span_selectors
+
+    latest_text = fig.text(0.02, 0.125, "", fontsize=9, family="monospace")
+    command_text = fig.text(0.02, 0.095, "", fontsize=9, family="monospace", color="tab:blue")
+    state_text = fig.text(0.02, 0.058, "", fontsize=8.5, family="monospace", color="tab:purple")
 
     def update(_):
-        t_raw, values, states, markers, frames, last_line = buf.snapshot()
+        t_raw, values, states, markers, selection, control_line, frames, last_line = buf.snapshot()
         t = rel_time(t_raw)
         if len(t) < 2:
             return []
@@ -569,6 +679,11 @@ def main() -> None:
             ax.grid(True, alpha=0.35)
             ax.axhline(0.0, color="0.35", linewidth=0.8, alpha=0.45)
             ax.set_xlim(t_plot[0], t_plot[-1])
+            if selection is not None:
+                sx0, sx1, _slabel = selection
+                if sx1 >= t_plot[0] and sx0 <= t_plot[-1]:
+                    ax.axvspan(max(sx0, t_plot[0]), min(sx1, t_plot[-1]),
+                               color="tab:orange", alpha=0.12)
 
         for ax, (title, names) in zip(axes, signal_groups.items()):
             for name in names:
@@ -620,6 +735,8 @@ def main() -> None:
             f"knee={latest('knee_rad')*57.2958:+.1f} deg vel={latest('knee_vel'):+.2f} rad/s | "
             f"tau_cmd={latest('tau_cmd'):+.2f} tau_fb={latest('tau_fb'):+.2f} Nm"
         )
+        if control_line != "commands: ready":
+            cmd_status["text"] = control_line
         command_text.set_text(cmd_status["text"])
         state_text.set_text(
             f"state={state} | {STATE_STRATEGY.get(state, 'unknown')}\n"
@@ -630,7 +747,7 @@ def main() -> None:
         fig.suptitle(
             f"KneeExo Unified Dashboard | frames={frames} last={last_line} state={state} "
             f"| z zero({args.shank_axis}, {'set' if imu_zero['set'] else 'raw'}), "
-            f"keys: 1 static, 2 forward, 3 backward, 4 flex, 5 landing, c clear",
+            f"drag select -> T fit/T send, keys: 1 static, 2 forward, 3 backward, 4 flex, 5 landing, c clear",
             fontsize=11,
         )
         axes[-1].set_xlabel("time (s)")

@@ -29,6 +29,8 @@ namespace ExoConfig{
     // =============================================================================
     constexpr gpio_num_t  PIN_BAT_ADC         = GPIO_NUM_1;   // ADC1_CH0
     constexpr float       BAT_DIVIDER_RATIO   = 11.0f;
+    constexpr int         BAT_ADC_CHANNEL     = 0;            // ADC_CHANNEL_0
+    constexpr int         BAT_ADC_SAMPLES     = 16;
 
     // =============================================================================
     // 2. IMU — WitMotion WT-IMU63，UART，9600 8N1（出厂默认波特率）

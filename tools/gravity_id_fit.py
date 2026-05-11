@@ -1,9 +1,11 @@
 """
 Fit shank-link gravity compensation parameters from exo_dashboard CSV.
 
-Model:
-  tau_link = G * sin(shank_rad + phi) + bias
-           = A * sin(shank_rad) + B * cos(shank_rad) + C
+Default model after IMU zero at naturally hanging shank:
+  tau_comp = G * sin(shank_rad) + bias
+
+Optional free-phase model:
+  tau_comp = G * sin(shank_rad + phi) + bias
 
 Usage:
   python tools/gravity_id_fit.py --csv logs/gravity_id_raw.csv
@@ -59,6 +61,8 @@ def main() -> None:
                     choices=["tau_fb", "tau_cmd"],
                     help="measured torque field to fit")
     ap.add_argument("--min-samples", type=int, default=30)
+    ap.add_argument("--free-phase", action="store_true",
+                    help="fit tau = G*sin(theta+phi)+bias; default constrains phi=0")
     args = ap.parse_args()
 
     rows: list[tuple[float, float]] = []
@@ -83,24 +87,40 @@ def main() -> None:
             "Run normal profile, hold several shank angles for 1-2s each."
         )
 
-    # Normal equations for [A, B, C].
-    ata = [[0.0] * 3 for _ in range(3)]
-    atb = [0.0] * 3
-    for shank_rad, tau in rows:
-        x = [math.sin(shank_rad), math.cos(shank_rad), 1.0]
-        for i in range(3):
-            atb[i] += x[i] * tau
-            for j in range(3):
-                ata[i][j] += x[i] * x[j]
+    if args.free_phase:
+        # Normal equations for [A, B, C].
+        ata = [[0.0] * 3 for _ in range(3)]
+        atb = [0.0] * 3
+        for shank_rad, tau in rows:
+            x = [math.sin(shank_rad), math.cos(shank_rad), 1.0]
+            for i in range(3):
+                atb[i] += x[i] * tau
+                for j in range(3):
+                    ata[i][j] += x[i] * x[j]
 
-    A, B, C = solve_3x3(ata, atb)
-    G = math.sqrt(A * A + B * B)
-    phi = math.atan2(B, A)
-    bias = C
+        A, B, C = solve_3x3(ata, atb)
+        G = math.sqrt(A * A + B * B)
+        phi = math.atan2(B, A)
+        bias = C
+    else:
+        ss = s1 = st = tt = 0.0
+        n = float(len(rows))
+        for shank_rad, tau in rows:
+            s = math.sin(shank_rad)
+            ss += s * s
+            s1 += s
+            st += s * tau
+            tt += tau
+        det = ss * n - s1 * s1
+        if abs(det) < 1e-9:
+            raise SystemExit("singular fit matrix; collect wider angle range")
+        G = (st * n - s1 * tt) / det
+        phi = 0.0
+        bias = (ss * tt - s1 * st) / det
 
     err2 = 0.0
     for shank_rad, tau in rows:
-        pred = A * math.sin(shank_rad) + B * math.cos(shank_rad) + C
+        pred = G * math.sin(shank_rad + phi) + bias
         err2 += (tau - pred) ** 2
     rmse = math.sqrt(err2 / len(rows))
 
@@ -121,7 +141,8 @@ def main() -> None:
     print(f"constexpr float   SHANK_GRAVITY_PHI_RAD   = {phi:.5f}f;")
     print(f"constexpr float   SHANK_GRAVITY_BIAS_NM   = {bias:.5f}f;")
     print()
-    print("If compensation makes the link feel heavier, flip the fitted sign by negating G or bias convention.")
+    print("With shank down zeroed to 0 deg, phi should normally stay near 0.")
+    print("If compensation makes the link feel heavier, flip the sign of G.")
 
 
 if __name__ == "__main__":
