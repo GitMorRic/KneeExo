@@ -11,6 +11,7 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_err.h"
+#include "nvs_flash.h"
 #include <math.h>
 
 #include "config.h"
@@ -71,12 +72,23 @@ static void calibrate_user_zero(void)
 
 extern "C" void profile_normal_main(void)
 {
+    esp_err_t nvs_err = nvs_flash_init();
+    if (nvs_err == ESP_ERR_NVS_NO_FREE_PAGES || nvs_err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        nvs_err = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(nvs_err);
+
     ESP_ERROR_CHECK(can_bus_init(PIN_TWAI_TX, PIN_TWAI_RX, CAN_BITRATE_HZ));
 
-    ESP_ERROR_CHECK(witmotion_init(SHANK_IMU_UART_NUM,
-                                   PIN_SHANK_IMU_MCU_TX,
-                                   PIN_SHANK_IMU_MCU_RX,
-                                   IMU_UART_BAUD));
+    ESP_ERROR_CHECK(witmotion_init_channel(IMU1_UART_NUM,
+                                           PIN_IMU1_MCU_TX,
+                                           PIN_IMU1_MCU_RX,
+                                           IMU_UART_BAUD));
+    ESP_ERROR_CHECK(witmotion_init_channel(IMU2_UART_NUM,
+                                           PIN_IMU2_MCU_TX,
+                                           PIN_IMU2_MCU_RX,
+                                           IMU_UART_BAUD));
 
     ESP_ERROR_CHECK(rs02_init(&g_motor, RS02_CAN_ID, RS02_HOST_ID));
     vTaskDelay(pdMS_TO_TICKS(200));
@@ -90,6 +102,13 @@ extern "C" void profile_normal_main(void)
     vTaskDelay(pdMS_TO_TICKS(20));
 
     ESP_LOGI(TAG, "Motor enabled, starting control task...");
+    xTaskCreatePinnedToCore(command_task,
+                            "command_task",
+                            4096,
+                            NULL,
+                            configMAX_PRIORITIES - 6,
+                            NULL,
+                            0);
     xTaskCreatePinnedToCore(control_task,
                             "control_task",
                             8192,

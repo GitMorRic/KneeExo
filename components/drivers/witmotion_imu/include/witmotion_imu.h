@@ -43,15 +43,24 @@ esp_err_t witmotion_init(uart_port_t port,
                          gpio_num_t  rx_pin,
                          int         baud);
 
+esp_err_t witmotion_init_channel(uart_port_t port,
+                                 gpio_num_t  tx_pin,
+                                 gpio_num_t  rx_pin,
+                                 int         baud);
+
 /**
  * @brief 拷贝一份最新数据（线程安全，mutex 保护）
  */
 esp_err_t witmotion_get_latest(witmotion_data_t *out);
 
+esp_err_t witmotion_get_latest_channel(uart_port_t port, witmotion_data_t *out);
+
 /**
  * @brief 是否至少收到过一帧有效数据
  */
 bool witmotion_is_alive(void);
+
+bool witmotion_is_alive_channel(uart_port_t port);
 
 #ifdef __cplusplus
 }

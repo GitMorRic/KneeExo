@@ -25,6 +25,7 @@ void profile_motor_test_main(void);
 
 // 100Hz 控制循环（profile_normal 专用）
 void control_task(void *arg);
+void command_task(void *arg);
 
 #ifdef __cplusplus
 }

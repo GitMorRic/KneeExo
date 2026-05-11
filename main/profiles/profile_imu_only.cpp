@@ -105,47 +105,73 @@ extern "C" void profile_imu_only_main(void)
     raw_uart_probe();
 
     // ------ 正式初始化 ------
-    ESP_ERROR_CHECK(witmotion_init(SHANK_IMU_UART_NUM,
-                                   PIN_SHANK_IMU_MCU_TX,
-                                   PIN_SHANK_IMU_MCU_RX,
-                                   IMU_UART_BAUD));
+    ESP_ERROR_CHECK(witmotion_init_channel(IMU1_UART_NUM,
+                                           PIN_IMU1_MCU_TX,
+                                           PIN_IMU1_MCU_RX,
+                                           IMU_UART_BAUD));
+    ESP_ERROR_CHECK(witmotion_init_channel(IMU2_UART_NUM,
+                                           PIN_IMU2_MCU_TX,
+                                           PIN_IMU2_MCU_RX,
+                                           IMU_UART_BAUD));
 
-    ESP_LOGI(TAG, "waiting for first IMU frame on UART%d (TX=%d RX=%d, %d bps)...",
-             (int)SHANK_IMU_UART_NUM, (int)PIN_SHANK_IMU_MCU_TX, (int)PIN_SHANK_IMU_MCU_RX, IMU_UART_BAUD);
+    ESP_LOGI(TAG, "waiting for first IMU frames: IMU1 UART%d TX=%d RX=%d, IMU2 UART%d TX=%d RX=%d, %d bps...",
+             (int)IMU1_UART_NUM, (int)PIN_IMU1_MCU_TX, (int)PIN_IMU1_MCU_RX,
+             (int)IMU2_UART_NUM, (int)PIN_IMU2_MCU_TX, (int)PIN_IMU2_MCU_RX,
+             IMU_UART_BAUD);
 
     // 最多等 10 秒，超时报错继续（避免永久卡死）
-    for (int i = 0; i < 100 && !witmotion_is_alive(); i++) {
+    for (int i = 0; i < 100
+         && !witmotion_is_alive_channel(IMU1_UART_NUM)
+         && !witmotion_is_alive_channel(IMU2_UART_NUM); i++) {
         if (i % 10 == 9) ESP_LOGW(TAG, "  still waiting... (%ds)", (i+1)/10);
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 
-    if (!witmotion_is_alive()) {
-        ESP_LOGE(TAG, "IMU NOT ALIVE after 10s! Check wiring. Probe results above tell you why.");
+    if (!witmotion_is_alive_channel(IMU1_UART_NUM)
+        && !witmotion_is_alive_channel(IMU2_UART_NUM)) {
+        ESP_LOGE(TAG, "NO IMU ALIVE after 10s! Check wiring. Probe results above tell you why.");
         while (true) vTaskDelay(pdMS_TO_TICKS(1000));
     }
 
-    ESP_LOGI(TAG, "IMU alive. Streaming CSV at %d Hz.", CONFIG_KNEEEXO_IMU_CSV_HZ);
+    const int stream_hz = CONFIG_KNEEEXO_IMU_CSV_HZ > 25 ? 25 : CONFIG_KNEEEXO_IMU_CSV_HZ;
+    ESP_LOGI(TAG, "IMU alive: IMU1=%d IMU2=%d. Streaming dual-IMU CSV at %d Hz.",
+             witmotion_is_alive_channel(IMU1_UART_NUM) ? 1 : 0,
+             witmotion_is_alive_channel(IMU2_UART_NUM) ? 1 : 0,
+             stream_hz);
 
     // 一次性输出表头（带 # 号，PC 端可忽略）
-    printf("# header: $IMU,t_us,ax,ay,az,gx,gy,gz,roll,pitch,yaw,T\n");
+    printf("# header: $IMU1/$IMU2,t_us,ax,ay,az,gx,gy,gz,roll,pitch,yaw,T\n");
     fflush(stdout);
 
-    const TickType_t period = pdMS_TO_TICKS(1000 / CONFIG_KNEEEXO_IMU_CSV_HZ);
+    const TickType_t period = pdMS_TO_TICKS(1000 / stream_hz);
     TickType_t last = xTaskGetTickCount();
-    witmotion_data_t d;
+    witmotion_data_t d1;
+    witmotion_data_t d2;
 
     while (true) {
-        if (witmotion_get_latest(&d) == ESP_OK) {
-            printf("$IMU,%lld,"
+        if (witmotion_get_latest_channel(IMU1_UART_NUM, &d1) == ESP_OK) {
+            printf("$IMU1,%lld,"
                    "%.4f,%.4f,%.4f,"
                    "%.2f,%.2f,%.2f,"
                    "%.2f,%.2f,%.2f,"
                    "%.1f\n",
-                   (long long)d.ts_us,
-                   d.accel_g[0], d.accel_g[1], d.accel_g[2],
-                   d.gyro_dps[0], d.gyro_dps[1], d.gyro_dps[2],
-                   d.euler_deg[0], d.euler_deg[1], d.euler_deg[2],
-                   d.temp_c);
+                   (long long)d1.ts_us,
+                   d1.accel_g[0], d1.accel_g[1], d1.accel_g[2],
+                   d1.gyro_dps[0], d1.gyro_dps[1], d1.gyro_dps[2],
+                   d1.euler_deg[0], d1.euler_deg[1], d1.euler_deg[2],
+                   d1.temp_c);
+        }
+        if (witmotion_get_latest_channel(IMU2_UART_NUM, &d2) == ESP_OK) {
+            printf("$IMU2,%lld,"
+                   "%.4f,%.4f,%.4f,"
+                   "%.2f,%.2f,%.2f,"
+                   "%.2f,%.2f,%.2f,"
+                   "%.1f\n",
+                   (long long)d2.ts_us,
+                   d2.accel_g[0], d2.accel_g[1], d2.accel_g[2],
+                   d2.gyro_dps[0], d2.gyro_dps[1], d2.gyro_dps[2],
+                   d2.euler_deg[0], d2.euler_deg[1], d2.euler_deg[2],
+                   d2.temp_c);
         }
         vTaskDelayUntil(&last, period);
     }

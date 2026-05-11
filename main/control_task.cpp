@@ -20,8 +20,11 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "nvs.h"
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "config.h"
 #include "rs02_motor.h"
@@ -46,6 +49,67 @@ static constexpr int   LOOP_HZ    = CONFIG_KNEEEXO_CONTROL_HZ;
 static constexpr float SOFT_LIMIT_MARGIN_RAD = 0.05f;
 static constexpr float DEG_TO_RAD = (float)M_PI / 180.0f;
 static constexpr float RAD_TO_DEG = 180.0f / (float)M_PI;
+
+static volatile bool  g_req_zero_imu = false;
+static volatile bool  g_req_zero_motor = false;
+static volatile bool  g_force_safe = false;
+static float          g_shank_pitch_zero_deg = 0.0f;
+static float          g_gravity_G_nm = SHANK_GRAVITY_G_NM;
+static float          g_gravity_phi_rad = SHANK_GRAVITY_PHI_RAD;
+static float          g_gravity_bias_nm = SHANK_GRAVITY_BIAS_NM;
+static bool           g_gravity_enabled = SHANK_GRAVITY_COMP_ENABLE;
+static bool           g_state_impedance_enabled =
+#if CONFIG_KNEEEXO_GAIT_IMU_ENABLE
+    true;
+#else
+    false;
+#endif
+static bool           g_params_loaded = false;
+
+static void load_runtime_params_once(void)
+{
+    if (g_params_loaded) {
+        return;
+    }
+    g_params_loaded = true;
+    nvs_handle_t h;
+    if (nvs_open("exo", NVS_READONLY, &h) != ESP_OK) {
+        return;
+    }
+    size_t len = sizeof(float);
+    nvs_get_blob(h, "imu_zero", &g_shank_pitch_zero_deg, &len);
+    len = sizeof(float);
+    nvs_get_blob(h, "grav_G", &g_gravity_G_nm, &len);
+    len = sizeof(float);
+    nvs_get_blob(h, "grav_phi", &g_gravity_phi_rad, &len);
+    len = sizeof(float);
+    nvs_get_blob(h, "grav_bias", &g_gravity_bias_nm, &len);
+    uint8_t en = g_gravity_enabled ? 1 : 0;
+    nvs_get_u8(h, "grav_en", &en);
+    g_gravity_enabled = en != 0;
+    nvs_close(h);
+    ESP_LOGI(TAG, "runtime params: imu_zero=%.3f deg, G=%.4f phi=%.4f bias=%.4f en=%d",
+             g_shank_pitch_zero_deg,
+             g_gravity_G_nm,
+             g_gravity_phi_rad,
+             g_gravity_bias_nm,
+             g_gravity_enabled ? 1 : 0);
+}
+
+static esp_err_t save_runtime_params(void)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open("exo", NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+    err = nvs_set_blob(h, "imu_zero", &g_shank_pitch_zero_deg, sizeof(float));
+    if (err == ESP_OK) err = nvs_set_blob(h, "grav_G", &g_gravity_G_nm, sizeof(float));
+    if (err == ESP_OK) err = nvs_set_blob(h, "grav_phi", &g_gravity_phi_rad, sizeof(float));
+    if (err == ESP_OK) err = nvs_set_blob(h, "grav_bias", &g_gravity_bias_nm, sizeof(float));
+    if (err == ESP_OK) err = nvs_set_u8(h, "grav_en", g_gravity_enabled ? 1 : 0);
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+    return err;
+}
 
 enum class ExoState : uint8_t {
     SafePassive = 0,
@@ -98,11 +162,11 @@ static inline float clamp_float(float x, float lo, float hi)
 
 static inline float gravity_comp_torque(float shank_pitch_rad)
 {
-    if (!SHANK_GRAVITY_COMP_ENABLE) {
+    if (!g_gravity_enabled) {
         return 0.0f;
     }
-    const float link_torque = SHANK_GRAVITY_G_NM * sinf(shank_pitch_rad + SHANK_GRAVITY_PHI_RAD)
-                            + SHANK_GRAVITY_BIAS_NM;
+    const float link_torque = g_gravity_G_nm * sinf(shank_pitch_rad + g_gravity_phi_rad)
+                            + g_gravity_bias_nm;
     return clamp_float(-link_torque, -SHANK_GRAVITY_MAX_NM, SHANK_GRAVITY_MAX_NM);
 }
 
@@ -152,7 +216,7 @@ static MotionFeatures update_features(const witmotion_data_t &imu,
     f.prev_shank_pitch_deg = prev_shank_pitch;
 
     f.shank_pitch_deg =
-        IMU_SHANK_PITCH_SIGN * imu.euler_deg[IMU_SHANK_PITCH_AXIS];
+        IMU_SHANK_PITCH_SIGN * imu.euler_deg[IMU_SHANK_PITCH_AXIS] - g_shank_pitch_zero_deg;
     f.shank_pitch_rate_dps =
         IMU_SHANK_PITCH_SIGN * imu.gyro_dps[IMU_SHANK_PITCH_AXIS];
     f.shank_pitch_rate_lp_dps =
@@ -217,7 +281,7 @@ static void update_state_machine(StateMachine &sm, const MotionFeatures &f)
     const bool unsafe_angle = f.knee_angle_rad < -5.0f * DEG_TO_RAD
                            || f.knee_angle_rad > 100.0f * DEG_TO_RAD;
     const bool unsafe_speed = fabsf(f.knee_vel_rad_s) > 8.0f;
-    if (f.sensor_fault || unsafe_angle || unsafe_speed) {
+    if (g_force_safe || f.sensor_fault || unsafe_angle || unsafe_speed) {
         transition_to(sm, ExoState::SafePassive, "global safety");
         return;
     }
@@ -320,6 +384,21 @@ static ImpedanceParams params_for_state(ExoState state, int loops_in_state)
     }
 }
 
+static void print_imu_telemetry(const char *tag, const witmotion_data_t &d)
+{
+    printf("%s,%lld,"
+           "%.4f,%.4f,%.4f,"
+           "%.2f,%.2f,%.2f,"
+           "%.2f,%.2f,%.2f,"
+           "%.1f\n",
+           tag,
+           (long long)d.ts_us,
+           d.accel_g[0], d.accel_g[1], d.accel_g[2],
+           d.gyro_dps[0], d.gyro_dps[1], d.gyro_dps[2],
+           d.euler_deg[0], d.euler_deg[1], d.euler_deg[2],
+           d.temp_c);
+}
+
 extern "C" void control_task(void *arg)
 {
     (void)arg;
@@ -330,9 +409,12 @@ extern "C" void control_task(void *arg)
     const uint32_t log_every = LOOP_HZ / 2;  // 每 0.5s 打印一次
     const uint32_t telemetry_every = LOOP_HZ / 10; // 10Hz CSV 给上位机
     witmotion_data_t  imu{};
+    witmotion_data_t  thigh_imu{};
+    witmotion_data_t  shank_imu{};
     rs02_feedback_t   fb{};
     StateMachine sm{};
 
+    load_runtime_params_once();
     log_gravity_id_points();
 
 #if CONFIG_KNEEEXO_WEAR_MODE_DAMPING
@@ -359,12 +441,30 @@ extern "C" void control_task(void *arg)
 #endif
 
     while (true) {
-        const bool imu_ok = (witmotion_get_latest(&imu) == ESP_OK);
+        const bool thigh_ok = (witmotion_get_latest_channel(IMU1_UART_NUM, &thigh_imu) == ESP_OK);
+        const bool shank_ok = (witmotion_get_latest_channel(IMU2_UART_NUM, &shank_imu) == ESP_OK);
+        imu = shank_imu;
+        const bool imu_ok = shank_ok;
         const bool motor_ok = (rs02_get_feedback(&g_motor, &fb, 0) == ESP_OK);
 
         const float joint_mech_pos = motor_to_joint_rad(fb.position_rad);
         const float joint_user_pos = joint_mech_pos - g_user_zero_offset_rad;
         const float joint_vel = motor_to_joint_vel(fb.velocity_rad_s);
+
+        if (g_req_zero_motor && motor_ok) {
+            g_user_zero_offset_rad = joint_mech_pos;
+            g_req_zero_motor = false;
+            ESP_LOGW(TAG, "CMD zero motor: user_zero=%+.4f rad", g_user_zero_offset_rad);
+            printf("$ACK,ZERO_MOTOR,%.5f\n", g_user_zero_offset_rad);
+        }
+        if (g_req_zero_imu && shank_ok) {
+            g_shank_pitch_zero_deg =
+                IMU_SHANK_PITCH_SIGN * shank_imu.euler_deg[IMU_SHANK_PITCH_AXIS];
+            g_req_zero_imu = false;
+            ESP_LOGW(TAG, "CMD zero IMU: shank_zero=%+.3f deg", g_shank_pitch_zero_deg);
+            printf("$ACK,ZERO_IMU,%.5f\n", g_shank_pitch_zero_deg);
+        }
+
         const MotionFeatures feat = update_features(imu, fb, imu_ok, motor_ok,
                                                     joint_mech_pos, joint_vel);
         update_state_machine(sm, feat);
@@ -374,11 +474,9 @@ extern "C" void control_task(void *arg)
         float joint_torque_ff = joint_gravity_ff;
         float joint_impedance_torque = 0.0f;
 
-#if CONFIG_KNEEEXO_GAIT_IMU_ENABLE
-        const ImpedanceParams ip = params_for_state(sm.state, sm.loops_in_state);
-#else
-        const ImpedanceParams ip = params_for_state(ExoState::SafePassive, sm.loops_in_state);
-#endif
+        const ImpedanceParams ip = g_state_impedance_enabled
+                                 ? params_for_state(sm.state, sm.loops_in_state)
+                                 : ImpedanceParams{0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
         joint_impedance_torque =
             ip.k_nm_per_rad * (ip.theta_eq_rad - joint_mech_pos)
           - ip.b_nm_s_per_rad * joint_vel
@@ -450,6 +548,12 @@ extern "C" void control_task(void *arg)
         }
 
         if ((loop_count % telemetry_every) == 0) {
+            if (thigh_ok) {
+                print_imu_telemetry("$IMU1", thigh_imu);
+            }
+            if (shank_ok) {
+                print_imu_telemetry("$IMU2", shank_imu);
+            }
             printf("$EXO,%lld,%s,"
                    "%.3f,%.3f,%.3f,"
                    "%.3f,%.3f,"
@@ -476,6 +580,84 @@ extern "C" void control_task(void *arg)
         }
 
         vTaskDelayUntil(&last_wake, period);
+    }
+}
+
+extern "C" void command_task(void *arg)
+{
+    (void)arg;
+    char line[128];
+    size_t n = 0;
+    ESP_LOGI(TAG, "command task ready: $CMD,ZERO_IMU / ZERO_MOTOR / SET_GRAV,G,phi,bias / SAFE,0|1");
+
+    while (true) {
+        int ch = getchar();
+        if (ch == EOF) {
+            vTaskDelay(pdMS_TO_TICKS(20));
+            continue;
+        }
+        if (ch == '\r') {
+            continue;
+        }
+        if (ch != '\n' && n < sizeof(line) - 1) {
+            line[n++] = (char)ch;
+            continue;
+        }
+
+        line[n] = '\0';
+        n = 0;
+        if (strncmp(line, "$CMD,", 5) != 0) {
+            continue;
+        }
+
+        char *cmd = line + 5;
+        if (strcmp(cmd, "ZERO_IMU") == 0) {
+            g_req_zero_imu = true;
+            printf("$ACK,REQ_ZERO_IMU\n");
+        } else if (strcmp(cmd, "ZERO_MOTOR") == 0) {
+            g_req_zero_motor = true;
+            printf("$ACK,REQ_ZERO_MOTOR\n");
+        } else if (strncmp(cmd, "SAFE,", 5) == 0) {
+            g_force_safe = atoi(cmd + 5) != 0;
+            printf("$ACK,SAFE,%d\n", g_force_safe ? 1 : 0);
+        } else if (strncmp(cmd, "SET_GRAV,", 9) == 0) {
+            float G = 0.0f;
+            float phi = 0.0f;
+            float bias = 0.0f;
+            if (sscanf(cmd + 9, "%f,%f,%f", &G, &phi, &bias) == 3) {
+                g_gravity_G_nm = G;
+                g_gravity_phi_rad = phi;
+                g_gravity_bias_nm = bias;
+                printf("$ACK,SET_GRAV,%.6f,%.6f,%.6f\n",
+                       g_gravity_G_nm, g_gravity_phi_rad, g_gravity_bias_nm);
+            } else {
+                printf("$ERR,SET_GRAV,parse\n");
+            }
+        } else if (strcmp(cmd, "SAVE_PARAMS") == 0) {
+            esp_err_t err = save_runtime_params();
+            if (err == ESP_OK) {
+                printf("$ACK,SAVE_PARAMS\n");
+            } else {
+                printf("$ERR,SAVE_PARAMS,%s\n", esp_err_to_name(err));
+            }
+        } else if (strncmp(cmd, "GRAV_ENABLE,", 12) == 0) {
+            g_gravity_enabled = atoi(cmd + 12) != 0;
+            printf("$ACK,GRAV_ENABLE,%d\n", g_gravity_enabled ? 1 : 0);
+        } else if (strncmp(cmd, "STATE_CTRL,", 11) == 0) {
+            g_state_impedance_enabled = atoi(cmd + 11) != 0;
+            printf("$ACK,STATE_CTRL,%d\n", g_state_impedance_enabled ? 1 : 0);
+        } else if (strcmp(cmd, "GET_PARAMS") == 0) {
+            printf("$ACK,PARAMS,imu_zero=%.6f,G=%.6f,phi=%.6f,bias=%.6f,grav_en=%d,state_ctrl=%d\n",
+                   g_shank_pitch_zero_deg,
+                   g_gravity_G_nm,
+                   g_gravity_phi_rad,
+                   g_gravity_bias_nm,
+                   g_gravity_enabled ? 1 : 0,
+                   g_state_impedance_enabled ? 1 : 0);
+        } else {
+            printf("$ERR,UNKNOWN,%s\n", cmd);
+        }
+        fflush(stdout);
     }
 }
 
