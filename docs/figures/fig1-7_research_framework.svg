@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1380" height="680" viewBox="0 0 1380 680">
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#334155"/>
+    </marker>
+    <style>
+      .title { font-family: "Microsoft YaHei", "SimHei", Arial, sans-serif; font-size: 30px; font-weight: 700; fill: #111827; }
+      .main { font-family: "Microsoft YaHei", "SimHei", Arial, sans-serif; font-size: 20px; font-weight: 700; fill: #111827; }
+      .sub { font-family: "Microsoft YaHei", "SimHei", Arial, sans-serif; font-size: 15px; fill: #334155; }
+      .tiny { font-family: "Microsoft YaHei", "SimHei", Arial, sans-serif; font-size: 13px; fill: #475569; }
+      .box { fill: #ffffff; stroke-width: 2.2; rx: 10; }
+      .need { stroke: #60a5fa; fill: #eff6ff; }
+      .mech { stroke: #f97316; fill: #fff7ed; }
+      .hw { stroke: #22c55e; fill: #f0fdf4; }
+      .ctrl { stroke: #a855f7; fill: #faf5ff; }
+      .exp { stroke: #14b8a6; fill: #ecfeff; }
+      .pill { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1.4; rx: 6; }
+      .line { fill: none; stroke: #334155; stroke-width: 2.6; marker-end: url(#arrow); }
+      .thin { fill: none; stroke: #94a3b8; stroke-width: 1.6; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect width="1380" height="680" fill="#ffffff"/>
+  <text x="690" y="52" text-anchor="middle" class="title">膝关节外骨骼研究内容框架</text>
+
+  <rect x="60" y="185" width="185" height="105" class="box need"/>
+  <text x="152.5" y="222" text-anchor="middle" class="main">需求与指标</text>
+  <text x="152.5" y="252" text-anchor="middle" class="sub">步态特征 / 人机约束</text>
+  <text x="152.5" y="275" text-anchor="middle" class="sub">力矩 / 重量 / 实时性</text>
+
+  <rect x="305" y="120" width="205" height="115" class="box mech"/>
+  <text x="407.5" y="158" text-anchor="middle" class="main">机械结构设计</text>
+  <text x="407.5" y="188" text-anchor="middle" class="sub">主动屈伸自由度</text>
+  <text x="407.5" y="212" text-anchor="middle" class="sub">被动补偿与绑缚相容性</text>
+
+  <rect x="305" y="315" width="205" height="115" class="box hw"/>
+  <text x="407.5" y="353" text-anchor="middle" class="main">硬件平台搭建</text>
+  <text x="407.5" y="383" text-anchor="middle" class="sub">ESP32-S3 / RS02 / IMU</text>
+  <text x="407.5" y="407" text-anchor="middle" class="sub">UART / CAN / ADC / USB</text>
+
+  <rect x="570" y="185" width="205" height="105" class="box ctrl"/>
+  <text x="672.5" y="222" text-anchor="middle" class="main">运动控制策略</text>
+  <text x="672.5" y="252" text-anchor="middle" class="sub">FSM 状态识别</text>
+  <text x="672.5" y="275" text-anchor="middle" class="sub">重力补偿 + 阻抗控制</text>
+
+  <rect x="835" y="120" width="205" height="115" class="box hw"/>
+  <text x="937.5" y="158" text-anchor="middle" class="main">上位机调试</text>
+  <text x="937.5" y="188" text-anchor="middle" class="sub">实时曲线 / 参数标定</text>
+  <text x="937.5" y="212" text-anchor="middle" class="sub">CSV 记录 / 模式切换</text>
+
+  <rect x="835" y="315" width="205" height="115" class="box exp"/>
+  <text x="937.5" y="353" text-anchor="middle" class="main">系统实验验证</text>
+  <text x="937.5" y="383" text-anchor="middle" class="sub">通信与采集验证</text>
+  <text x="937.5" y="407" text-anchor="middle" class="sub">状态 / 补偿 / 安全测试</text>
+
+  <rect x="1100" y="185" width="215" height="105" class="box exp"/>
+  <text x="1207.5" y="222" text-anchor="middle" class="main">样机平台结果</text>
+  <text x="1207.5" y="252" text-anchor="middle" class="sub">可穿戴机电系统</text>
+  <text x="1207.5" y="275" text-anchor="middle" class="sub">支撑后续算法研究</text>
+
+  <path d="M245 237.5 L292 177.5" class="line"/>
+  <path d="M245 237.5 L292 372.5" class="line"/>
+  <path d="M510 177.5 C535 177.5 540 237.5 557 237.5" class="line"/>
+  <path d="M510 372.5 C535 372.5 540 237.5 557 237.5" class="line"/>
+  <path d="M775 237.5 L822 177.5" class="line"/>
+  <path d="M775 237.5 L822 372.5" class="line"/>
+  <path d="M1040 177.5 C1070 177.5 1070 237.5 1087 237.5" class="line"/>
+  <path d="M1040 372.5 C1070 372.5 1070 237.5 1087 237.5" class="line"/>
+
+  <rect x="92" y="335" width="120" height="36" class="pill"/>
+  <text x="152" y="358" text-anchor="middle" class="tiny">理论分析</text>
+  <path d="M152 290 L152 326" class="thin"/>
+
+  <rect x="332" y="62" width="151" height="34" class="pill"/>
+  <text x="407.5" y="84" text-anchor="middle" class="tiny">结构迭代与样机</text>
+  <path d="M407.5 96 L407.5 112" class="thin"/>
+
+  <rect x="331" y="452" width="153" height="34" class="pill"/>
+  <text x="407.5" y="474" text-anchor="middle" class="tiny">数据采集与通信</text>
+  <path d="M407.5 430 L407.5 444" class="thin"/>
+
+  <rect x="596" y="335" width="153" height="36" class="pill"/>
+  <text x="672.5" y="358" text-anchor="middle" class="tiny">统一力矩模型</text>
+  <path d="M672.5 290 L672.5 326" class="thin"/>
+
+  <rect x="850" y="62" width="175" height="34" class="pill"/>
+  <text x="937.5" y="84" text-anchor="middle" class="tiny">标定 / 监测 / 记录</text>
+  <path d="M937.5 96 L937.5 112" class="thin"/>
+
+  <rect x="848" y="452" width="179" height="34" class="pill"/>
+  <text x="937.5" y="474" text-anchor="middle" class="tiny">功能性验证闭环</text>
+  <path d="M937.5 430 L937.5 444" class="thin"/>
+
+  <line x1="80" y1="550" x2="1300" y2="550" stroke="#e2e8f0" stroke-width="1.5"/>
+  <text x="690" y="590" text-anchor="middle" class="sub">研究主线：需求分析 → 结构与硬件实现 → 控制策略设计 → 上位机调试 → 样机功能验证</text>
+  <text x="690" y="620" text-anchor="middle" class="tiny">注：本研究重点在于完成可穿戴膝关节外骨骼机电平台与控制策略的样机阶段验证。</text>
+</svg>

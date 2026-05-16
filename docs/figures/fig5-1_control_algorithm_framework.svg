@@ -1,0 +1,140 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="720" viewBox="0 0 1400 720">
+  <defs>
+    <marker id="arrow-blue" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#2563eb"/>
+    </marker>
+    <marker id="arrow-green" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#15803d"/>
+    </marker>
+    <marker id="arrow-gray" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#475569"/>
+    </marker>
+    <style>
+      .title { font-family: "Microsoft YaHei", "SimHei", Arial, sans-serif; font-size: 30px; font-weight: 700; fill: #0f172a; }
+      .subtitle { font-family: "Microsoft YaHei", "SimHei", Arial, sans-serif; font-size: 18px; fill: #475569; }
+      .lane-title { font-family: "Microsoft YaHei", "SimHei", Arial, sans-serif; font-size: 20px; font-weight: 700; fill: #1e293b; }
+      .box-title { font-family: "Microsoft YaHei", "SimHei", Arial, sans-serif; font-size: 19px; font-weight: 700; fill: #0f172a; }
+      .box-text { font-family: "Microsoft YaHei", "SimHei", Arial, sans-serif; font-size: 15px; fill: #334155; }
+      .formula { font-family: "Times New Roman", serif; font-size: 17px; fill: #1e293b; font-style: italic; }
+      .small { font-family: "Microsoft YaHei", "SimHei", Arial, sans-serif; font-size: 14px; fill: #64748b; }
+      .caption { font-family: "Microsoft YaHei", "SimHei", Arial, sans-serif; font-size: 16px; fill: #334155; }
+      .panel { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1.5; rx: 18; }
+      .input { fill: #eff6ff; stroke: #93c5fd; stroke-width: 2; rx: 12; }
+      .low { fill: #f0fdf4; stroke: #86efac; stroke-width: 2; rx: 12; }
+      .mid { fill: #fff7ed; stroke: #fdba74; stroke-width: 2; rx: 12; }
+      .high { fill: #fef2f2; stroke: #fca5a5; stroke-width: 2; rx: 12; }
+      .safe { fill: #f1f5f9; stroke: #94a3b8; stroke-width: 2; rx: 12; }
+      .output { fill: #ecfdf5; stroke: #22c55e; stroke-width: 2.5; rx: 12; }
+      .feedback { fill: none; stroke: #475569; stroke-width: 3; marker-end: url(#arrow-gray); }
+      .sig { fill: none; stroke: #2563eb; stroke-width: 3; marker-end: url(#arrow-blue); }
+      .cmd { fill: none; stroke: #15803d; stroke-width: 3.5; marker-end: url(#arrow-green); }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1400" height="720" fill="#ffffff"/>
+  <text x="700" y="48" text-anchor="middle" class="title">膝关节外骨骼运动控制系统算法框架</text>
+  <text x="700" y="78" text-anchor="middle" class="subtitle">输入感知 → 底层预处理 → 中层状态识别 → 高层力矩控制 → RS02 执行，并由电机编码器形成闭环反馈</text>
+
+  <rect x="45" y="115" width="250" height="460" class="panel"/>
+  <rect x="330" y="115" width="250" height="460" class="panel"/>
+  <rect x="615" y="115" width="250" height="460" class="panel"/>
+  <rect x="900" y="115" width="250" height="460" class="panel"/>
+  <rect x="1185" y="115" width="170" height="460" class="panel"/>
+
+  <text x="170" y="150" text-anchor="middle" class="lane-title">输入感知层</text>
+  <text x="455" y="150" text-anchor="middle" class="lane-title">底层预处理</text>
+  <text x="740" y="150" text-anchor="middle" class="lane-title">中层状态识别</text>
+  <text x="1025" y="150" text-anchor="middle" class="lane-title">高层力矩控制</text>
+  <text x="1270" y="150" text-anchor="middle" class="lane-title">执行层</text>
+
+  <rect x="78" y="185" width="184" height="92" class="input"/>
+  <text x="170" y="214" text-anchor="middle" class="box-title">小腿 IMU</text>
+  <text x="170" y="240" text-anchor="middle" class="box-text">姿态角 θs、角速度 ωs</text>
+  <text x="170" y="263" text-anchor="middle" class="box-text">加速度 ax, ay, az</text>
+
+  <rect x="78" y="310" width="184" height="82" class="input"/>
+  <text x="170" y="340" text-anchor="middle" class="box-title">大腿 IMU</text>
+  <text x="170" y="366" text-anchor="middle" class="box-text">姿态角 θt</text>
+  <text x="170" y="385" text-anchor="middle" class="small">预留扩展 / 双 IMU 融合</text>
+
+  <rect x="78" y="425" width="184" height="92" class="input"/>
+  <text x="170" y="454" text-anchor="middle" class="box-title">电机反馈</text>
+  <text x="170" y="480" text-anchor="middle" class="box-text">编码器 qk、q̇k</text>
+  <text x="170" y="503" text-anchor="middle" class="box-text">电流 / 估算力矩 τfb</text>
+
+  <rect x="363" y="185" width="184" height="92" class="low"/>
+  <text x="455" y="214" text-anchor="middle" class="box-title">坐标统一</text>
+  <text x="455" y="240" text-anchor="middle" class="box-text">零位校准、符号转换</text>
+  <text x="455" y="263" text-anchor="middle" class="box-text">得到 shank_pitch</text>
+
+  <rect x="363" y="310" width="184" height="82" class="low"/>
+  <text x="455" y="340" text-anchor="middle" class="box-title">滤波与窗口</text>
+  <text x="455" y="366" text-anchor="middle" class="box-text">低通 / 滑动窗口</text>
+  <text x="455" y="385" text-anchor="middle" class="small">抑制单点噪声触发</text>
+
+  <rect x="363" y="425" width="184" height="92" class="low"/>
+  <text x="455" y="454" text-anchor="middle" class="box-title">特征提取</text>
+  <text x="455" y="480" text-anchor="middle" class="box-text">冲击 Δa、摆动速度</text>
+  <text x="455" y="503" text-anchor="middle" class="box-text">角速度过零、角度边界</text>
+
+  <rect x="648" y="195" width="184" height="112" class="mid"/>
+  <text x="740" y="225" text-anchor="middle" class="box-title">有限状态机 FSM</text>
+  <text x="740" y="252" text-anchor="middle" class="box-text">SAFE / IDS / SINGLE</text>
+  <text x="740" y="276" text-anchor="middle" class="box-text">ISWING / MSWING / TSWING</text>
+  <text x="740" y="298" text-anchor="middle" class="small">根据实时物理特征切换</text>
+
+  <rect x="648" y="350" width="184" height="112" class="mid"/>
+  <text x="740" y="380" text-anchor="middle" class="box-title">状态参数表</text>
+  <text x="740" y="407" text-anchor="middle" class="box-text">Ks、Bs、qeq,s、τff,s</text>
+  <text x="740" y="431" text-anchor="middle" class="box-text">τmax,s、超时保护</text>
+  <text x="740" y="453" text-anchor="middle" class="small">状态决定控制风格</text>
+
+  <rect x="933" y="178" width="184" height="92" class="high"/>
+  <text x="1025" y="207" text-anchor="middle" class="box-title">重力补偿</text>
+  <text x="1025" y="236" text-anchor="middle" class="formula">τg = G sin(θs) + τ0</text>
+  <text x="1025" y="257" text-anchor="middle" class="small">补偿小腿杆自重</text>
+
+  <rect x="933" y="305" width="184" height="105" class="high"/>
+  <text x="1025" y="334" text-anchor="middle" class="box-title">降阶阻抗控制</text>
+  <text x="1025" y="363" text-anchor="middle" class="formula">τimp = Ks(qeq,s-qk)-Bs q̇k+τff,s</text>
+  <text x="1025" y="389" text-anchor="middle" class="small">支撑、摆动、末摆参数切换</text>
+
+  <rect x="933" y="445" width="184" height="92" class="safe"/>
+  <text x="1025" y="474" text-anchor="middle" class="box-title">安全限幅</text>
+  <text x="1025" y="501" text-anchor="middle" class="box-text">clip + rateLimit</text>
+  <text x="1025" y="523" text-anchor="middle" class="small">异常立即进入 SAFE</text>
+
+  <rect x="1212" y="230" width="116" height="112" class="output"/>
+  <text x="1270" y="262" text-anchor="middle" class="box-title">RS02</text>
+  <text x="1270" y="290" text-anchor="middle" class="box-text">力矩模式</text>
+  <text x="1270" y="316" text-anchor="middle" class="formula">τout</text>
+
+  <rect x="1212" y="395" width="116" height="92" class="output"/>
+  <text x="1270" y="425" text-anchor="middle" class="box-title">膝关节</text>
+  <text x="1270" y="451" text-anchor="middle" class="box-text">外骨骼</text>
+  <text x="1270" y="474" text-anchor="middle" class="small">辅助 / 阻尼</text>
+
+  <path d="M262 231 C292 231 317 231 350 231" class="sig"/>
+  <path d="M262 351 C292 351 317 351 350 351" class="sig"/>
+  <path d="M262 471 C292 471 317 471 350 471" class="sig"/>
+  <path d="M547 231 C575 231 600 231 635 231" class="sig"/>
+  <path d="M547 351 C575 351 600 351 635 351" class="sig"/>
+  <path d="M547 471 C575 471 600 433 635 407" class="sig"/>
+  <path d="M832 251 C865 251 895 224 920 224" class="sig"/>
+  <path d="M832 406 C867 406 892 357 920 357" class="sig"/>
+  <path d="M1117 224 C1148 224 1175 260 1200 283" class="cmd"/>
+  <path d="M1117 357 C1150 357 1172 295 1200 288" class="cmd"/>
+  <path d="M1117 491 C1148 491 1175 360 1200 303" class="cmd"/>
+  <path d="M1270 342 L1270 382" class="cmd"/>
+
+  <path d="M1212 442 C1060 615 370 640 170 520" class="feedback"/>
+  <text x="680" y="645" text-anchor="middle" class="caption">CAN 反馈：电机位置 qk、速度 q̇k、电流 / 估算力矩 τfb、故障状态</text>
+
+  <line x1="70" y1="608" x2="1328" y2="608" stroke="#e2e8f0" stroke-width="1"/>
+  <path d="M110 675 L195 675" class="sig"/>
+  <text x="210" y="681" class="caption">传感器与反馈数据流</text>
+  <path d="M430 675 L515 675" class="cmd"/>
+  <text x="530" y="681" class="caption">力矩命令输出</text>
+  <path d="M745 675 L830 675" class="feedback"/>
+  <text x="845" y="681" class="caption">编码器 / 驱动器闭环反馈</text>
+</svg>

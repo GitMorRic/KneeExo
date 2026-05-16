@@ -14,6 +14,7 @@ idf_component_register(
         rs02_motor
         witmotion_imu
         esp_timer
+        esp_adc
         nvs_flash
         driver
         log

@@ -1,16 +1,16 @@
-// control_task.cpp
-// 100Hz 控制循环 demo（profile = normal 时启动）：
+﻿// control_task.cpp
+// 100Hz 鎺у埗寰幆 demo锛坧rofile = normal 鏃跺惎鍔級锛?
 //
-// 仅在 normal profile 下编译；其他 profile 不引用 g_motor。
-//   - 读取 IMU 最新数据
-//   - 读取电机反馈
-//   - 穿戴调试：透明模式 / 小阻尼模式 / 小助力跟随 + 落地缓冲
-//   - 每 0.5s 打印一行日志（关节坐标 + 大腿俯仰）
+// 浠呭湪 normal profile 涓嬬紪璇戯紱鍏朵粬 profile 涓嶅紩鐢?g_motor銆?
+//   - 璇诲彇 IMU 鏈€鏂版暟鎹?
+//   - 璇诲彇鐢垫満鍙嶉
+//   - 绌挎埓璋冭瘯锛氶€忔槑妯″紡 / 灏忛樆灏兼ā寮?/ 灏忓姪鍔涜窡闅?+ 钀藉湴缂撳啿
+//   - 姣?0.5s 鎵撳嵃涓€琛屾棩蹇楋紙鍏宠妭鍧愭爣 + 澶ц吙淇话锛?
 //
-// 后续替换思路：
-//   1. 从 IMU 估算大腿姿态 / 步态相位
-//   2. 由相位机决定 (target_joint_pos, torque_ff)
-//   3. 经 joint_to_motor_rad/_torque 转回电机坐标，调 rs02_motion_control
+// 鍚庣画鏇挎崲鎬濊矾锛?
+//   1. 浠?IMU 浼扮畻澶ц吙濮挎€?/ 姝ユ€佺浉浣?
+//   2. 鐢辩浉浣嶆満鍐冲畾 (target_joint_pos, torque_ff)
+//   3. 缁?joint_to_motor_rad/_torque 杞洖鐢垫満鍧愭爣锛岃皟 rs02_motion_control
 
 #include "sdkconfig.h"
 
@@ -18,6 +18,9 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_adc/adc_cali.h"
+#include "esp_adc/adc_cali_scheme.h"
+#include "esp_adc/adc_oneshot.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "nvs.h"
@@ -34,7 +37,7 @@
 using namespace ExoConfig;
 
 #ifndef CONFIG_KNEEEXO_GAIT_IMPACT_SPIKE_X100
-#define CONFIG_KNEEEXO_GAIT_IMPACT_SPIKE_X100 18
+#define CONFIG_KNEEEXO_GAIT_IMPACT_SPIKE_X100 8
 #endif
 #ifndef CONFIG_KNEEEXO_GAIT_LANDING_COOLDOWN_MS
 #define CONFIG_KNEEEXO_GAIT_LANDING_COOLDOWN_MS 350
@@ -61,11 +64,24 @@ static bool           g_gravity_enabled = SHANK_GRAVITY_COMP_ENABLE;
 static bool           g_state_impedance_enabled = true;
 static bool           g_state_lock_enabled = false;
 static uint8_t        g_state_lock_id = 0;
+static volatile uint8_t g_manual_mode = 0; // 0=off, 1=torque, 2=position hold.
+static volatile float g_manual_torque_nm = 0.0f;
+static volatile float g_manual_pos_user_rad = 0.0f;
+static volatile float g_manual_k_nm_per_rad = 3.0f;
+static volatile float g_manual_b_nm_s_per_rad = 0.25f;
+static volatile float g_manual_limit_nm = 1.0f;
 static float          g_landing_impact_thresh_g =
     (float)CONFIG_KNEEEXO_GAIT_IMPACT_SPIKE_X100 / 100.0f;
 static float          g_swing_rate_thresh_dps =
     (float)CONFIG_KNEEEXO_GAIT_SWING_RATE_DPS;
 static bool           g_params_loaded = false;
+static adc_oneshot_unit_handle_t g_bat_adc_unit = nullptr;
+static adc_cali_handle_t g_bat_adc_cali = nullptr;
+static bool g_bat_adc_cali_enabled = false;
+
+static constexpr float MANUAL_TORQUE_MAX_NM = 3.0f;
+static constexpr float MANUAL_POS_K_MAX = 30.0f;
+static constexpr float MANUAL_POS_B_MAX = 3.0f;
 
 static void load_runtime_params_once(void)
 {
@@ -80,6 +96,8 @@ static void load_runtime_params_once(void)
     size_t len = sizeof(float);
     nvs_get_blob(h, "imu_zero", &g_shank_pitch_zero_deg, &len);
     len = sizeof(float);
+    nvs_get_blob(h, "motor_zero", &g_user_zero_offset_rad, &len);
+    len = sizeof(float);
     nvs_get_blob(h, "grav_G", &g_gravity_G_nm, &len);
     len = sizeof(float);
     nvs_get_blob(h, "grav_phi", &g_gravity_phi_rad, &len);
@@ -93,8 +111,9 @@ static void load_runtime_params_once(void)
     nvs_get_u8(h, "grav_en", &en);
     g_gravity_enabled = en != 0;
     nvs_close(h);
-    ESP_LOGI(TAG, "runtime params: imu_zero=%.3f deg, G=%.4f phi=%.4f bias=%.4f en=%d impact=%.3fg swing=%.1fdps",
+    ESP_LOGI(TAG, "runtime params: imu_zero=%.3f deg, motor_zero=%.4f rad, G=%.4f phi=%.4f bias=%.4f en=%d impact=%.3fg swing=%.1fdps",
              g_shank_pitch_zero_deg,
+             g_user_zero_offset_rad,
              g_gravity_G_nm,
              g_gravity_phi_rad,
              g_gravity_bias_nm,
@@ -109,6 +128,7 @@ static esp_err_t save_runtime_params(void)
     esp_err_t err = nvs_open("exo", NVS_READWRITE, &h);
     if (err != ESP_OK) return err;
     err = nvs_set_blob(h, "imu_zero", &g_shank_pitch_zero_deg, sizeof(float));
+    if (err == ESP_OK) err = nvs_set_blob(h, "motor_zero", &g_user_zero_offset_rad, sizeof(float));
     if (err == ESP_OK) err = nvs_set_blob(h, "grav_G", &g_gravity_G_nm, sizeof(float));
     if (err == ESP_OK) err = nvs_set_blob(h, "grav_phi", &g_gravity_phi_rad, sizeof(float));
     if (err == ESP_OK) err = nvs_set_blob(h, "grav_bias", &g_gravity_bias_nm, sizeof(float));
@@ -118,6 +138,64 @@ static esp_err_t save_runtime_params(void)
     if (err == ESP_OK) err = nvs_commit(h);
     nvs_close(h);
     return err;
+}
+
+static void battery_adc_init(void)
+{
+    adc_oneshot_unit_init_cfg_t unit_cfg = {};
+    unit_cfg.unit_id = ADC_UNIT_1;
+    unit_cfg.ulp_mode = ADC_ULP_MODE_DISABLE;
+    ESP_ERROR_CHECK(adc_oneshot_new_unit(&unit_cfg, &g_bat_adc_unit));
+
+    adc_oneshot_chan_cfg_t chan_cfg = {};
+    chan_cfg.atten = ADC_ATTEN_DB_12;
+    chan_cfg.bitwidth = ADC_BITWIDTH_DEFAULT;
+    ESP_ERROR_CHECK(adc_oneshot_config_channel(g_bat_adc_unit,
+                                               (adc_channel_t)BAT_ADC_CHANNEL,
+                                               &chan_cfg));
+
+    adc_cali_curve_fitting_config_t cali_cfg = {};
+    cali_cfg.unit_id = ADC_UNIT_1;
+    cali_cfg.chan = (adc_channel_t)BAT_ADC_CHANNEL;
+    cali_cfg.atten = ADC_ATTEN_DB_12;
+    cali_cfg.bitwidth = ADC_BITWIDTH_DEFAULT;
+    esp_err_t err = adc_cali_create_scheme_curve_fitting(&cali_cfg, &g_bat_adc_cali);
+    g_bat_adc_cali_enabled = (err == ESP_OK);
+    ESP_LOGI(TAG, "battery ADC: GPIO%d ADC1_CH%d divider=%.2f calibration=%s",
+             (int)PIN_BAT_ADC,
+             BAT_ADC_CHANNEL,
+             BAT_DIVIDER_RATIO,
+             g_bat_adc_cali_enabled ? "curve_fitting" : "raw_fallback");
+}
+
+static float battery_voltage_read(void)
+{
+    if (g_bat_adc_unit == nullptr) {
+        return NAN;
+    }
+    int raw_sum = 0;
+    int ok_count = 0;
+    for (int i = 0; i < BAT_ADC_SAMPLES; i++) {
+        int raw = 0;
+        if (adc_oneshot_read(g_bat_adc_unit, (adc_channel_t)BAT_ADC_CHANNEL, &raw) == ESP_OK) {
+            raw_sum += raw;
+            ok_count++;
+        }
+    }
+    if (ok_count == 0) {
+        return NAN;
+    }
+    const int raw_avg = raw_sum / ok_count;
+    int mv = 0;
+    if (g_bat_adc_cali_enabled
+        && adc_cali_raw_to_voltage(g_bat_adc_cali, raw_avg, &mv) == ESP_OK) {
+        return ((float)mv / 1000.0f) * BAT_DIVIDER_RATIO;
+    }
+
+    // 12 dB attenuation nominally maps close to 3.3 V full scale. This branch is
+    // only a fallback when eFuse calibration is unavailable.
+    const float adc_v = ((float)raw_avg / 4095.0f) * 3.3f;
+    return adc_v * BAT_DIVIDER_RATIO;
 }
 
 enum class ExoState : uint8_t {
@@ -233,6 +311,8 @@ static MotionFeatures update_features(const witmotion_data_t &imu,
 {
     static MotionFeatures f{};
     static int landing_cooldown_loops = 0;
+    static int64_t prev_imu_ts_us = 0;
+    static float last_shank_rate_from_euler = 0.0f;
     const float prev_knee_vel_lp = f.knee_vel_lp_rad_s;
     const float prev_shank_pitch = f.shank_pitch_deg;
     const float prev_shank_rate_lp = f.shank_pitch_rate_lp_dps;
@@ -246,10 +326,21 @@ static MotionFeatures update_features(const witmotion_data_t &imu,
     f.knee_vel_lp_rad_s = 0.75f * f.knee_vel_lp_rad_s + 0.25f * joint_vel;
     f.prev_shank_pitch_deg = prev_shank_pitch;
 
-    f.shank_pitch_deg =
+    const float shank_pitch_deg =
         IMU_SHANK_PITCH_SIGN * imu.euler_deg[IMU_SHANK_PITCH_AXIS] - g_shank_pitch_zero_deg;
-    f.shank_pitch_rate_dps =
-        IMU_SHANK_PITCH_SIGN * imu.gyro_dps[IMU_SHANK_PITCH_AXIS];
+    f.shank_pitch_deg = shank_pitch_deg;
+    float shank_rate_from_euler = last_shank_rate_from_euler;
+    if (prev_imu_ts_us > 0 && imu.ts_us > prev_imu_ts_us) {
+        const float dt_s = (float)(imu.ts_us - prev_imu_ts_us) / 1000000.0f;
+        if (dt_s > 0.001f && dt_s < 0.100f) {
+            shank_rate_from_euler = (shank_pitch_deg - prev_shank_pitch) / dt_s;
+            last_shank_rate_from_euler = clamp_float(shank_rate_from_euler,
+                                                     -500.0f,
+                                                     500.0f);
+        }
+    }
+    prev_imu_ts_us = imu.ts_us;
+    f.shank_pitch_rate_dps = last_shank_rate_from_euler;
     f.shank_pitch_rate_lp_dps =
         0.75f * f.shank_pitch_rate_lp_dps + 0.25f * f.shank_pitch_rate_dps;
     f.prev_shank_pitch_rate_lp_dps = prev_shank_rate_lp;
@@ -257,7 +348,7 @@ static MotionFeatures update_features(const witmotion_data_t &imu,
                        + imu.accel_g[1] * imu.accel_g[1]
                        + imu.accel_g[2] * imu.accel_g[2]);
 
-    // 约 30~80ms 量级的平滑/高通特征，避免单点噪声触发状态跳变。
+    // Smooth the acceleration magnitude so impact_g only captures short spikes.
     f.acc_norm_lp_g = 0.95f * f.acc_norm_lp_g + 0.05f * f.acc_norm_g;
     f.impact_g = f.acc_norm_g - f.acc_norm_lp_g;
 
@@ -326,15 +417,35 @@ static void update_state_machine(StateMachine &sm, const MotionFeatures &f)
     }
 
     const int timeout_stance = LOOP_HZ * 2;
-    const int timeout_swing = LOOP_HZ * 3 / 10; // 300ms
-    const bool backward_swing = f.shank_pitch_rate_lp_dps < -g_swing_rate_thresh_dps
-                             && f.shank_pitch_deg < -6.0f;
+    const int timeout_swing = LOOP_HZ; // 1s guard; long enough for slow bench validation.
+    const float swing_entry_rate = 0.65f * g_swing_rate_thresh_dps;
+    const bool backward_swing = f.shank_pitch_rate_lp_dps < -swing_entry_rate
+                             && f.shank_pitch_deg < -5.0f;
     const bool knee_flexing = f.knee_vel_lp_rad_s > 0.18f
                            && f.knee_angle_rad < 1.25f;
-    const bool swing_like = backward_swing || knee_flexing;
+    const bool knee_flexing_with_shank_swing =
+        knee_flexing
+        && f.shank_pitch_rate_lp_dps < -0.35f * g_swing_rate_thresh_dps
+        && f.shank_pitch_deg < -3.0f;
+    const bool swing_like = backward_swing || knee_flexing_with_shank_swing;
     const bool terminal_swing_like = f.shank_pitch_rate_lp_dps > 0.35f * g_swing_rate_thresh_dps
                                   && f.knee_vel_lp_rad_s < -0.08f
                                   && f.knee_angle_rad < 0.75f;
+    const bool extending_after_peak = f.knee_angle_rad < 0.60f
+                                   && f.knee_vel_lp_rad_s < -0.05f
+                                   && f.shank_pitch_rate_lp_dps > 0.0f;
+    const bool forward_swing = f.shank_pitch_rate_lp_dps > 0.25f * g_swing_rate_thresh_dps;
+    const bool knee_extending = f.knee_vel_lp_rad_s < -0.04f;
+    const bool swing_peak_or_reversal =
+        f.knee_flexion_peak
+        || (forward_swing && f.shank_pitch_deg < -4.0f)
+        || (knee_extending && f.knee_angle_rad > 0.35f);
+    const bool terminal_ready =
+        terminal_swing_like
+        || extending_after_peak
+        || f.shank_vertical_cross
+        || (f.shank_pitch_deg > -6.0f && knee_extending)
+        || (f.knee_angle_rad < 0.40f && f.shank_pitch_rate_lp_dps > 0.0f);
 
     switch (sm.state) {
     case ExoState::SafePassive:
@@ -369,7 +480,7 @@ static void update_state_machine(StateMachine &sm, const MotionFeatures &f)
     case ExoState::InitialSwing:
         if (f.landing_event) {
             transition_to(sm, ExoState::InitialDoubleSupport, "landing during initial swing");
-        } else if (f.knee_flexion_peak) {
+        } else if (sm.loops_in_state > LOOP_HZ / 20 && swing_peak_or_reversal) {
             transition_to(sm, ExoState::MidSwing, "swing reversal/flexion peak");
         } else if (sm.loops_in_state > timeout_swing) {
             transition_to(sm, ExoState::SafePassive, "initial swing timeout guard");
@@ -379,7 +490,7 @@ static void update_state_machine(StateMachine &sm, const MotionFeatures &f)
     case ExoState::MidSwing:
         if (f.landing_event) {
             transition_to(sm, ExoState::InitialDoubleSupport, "landing during mid swing");
-        } else if (terminal_swing_like || f.shank_vertical_cross) {
+        } else if (sm.loops_in_state > LOOP_HZ / 20 && terminal_ready) {
             transition_to(sm, ExoState::TerminalSwing, "extension/forward swing");
         } else if (sm.loops_in_state > timeout_swing) {
             transition_to(sm, ExoState::SafePassive, "mid swing timeout guard");
@@ -428,7 +539,7 @@ static ImpedanceParams params_for_state(ExoState state, int loops_in_state)
     }
 }
 
-static void print_imu_telemetry(const char *tag, const witmotion_data_t &d)
+static void print_imu_telemetry(const char *tag, const witmotion_data_t &d, int64_t t_us)
 {
     printf("%s,%lld,"
            "%.4f,%.4f,%.4f,"
@@ -436,7 +547,7 @@ static void print_imu_telemetry(const char *tag, const witmotion_data_t &d)
            "%.2f,%.2f,%.2f,"
            "%.1f\n",
            tag,
-           (long long)d.ts_us,
+           (long long)t_us,
            d.accel_g[0], d.accel_g[1], d.accel_g[2],
            d.gyro_dps[0], d.gyro_dps[1], d.gyro_dps[2],
            d.euler_deg[0], d.euler_deg[1], d.euler_deg[2],
@@ -450,16 +561,17 @@ extern "C" void control_task(void *arg)
     TickType_t last_wake = xTaskGetTickCount();
 
     uint32_t loop_count = 0;
-    const uint32_t log_every = LOOP_HZ / 2;  // 每 0.5s 打印一次
-    const uint32_t telemetry_every = LOOP_HZ / 10; // 10Hz CSV 给上位机
+    const uint32_t log_every = LOOP_HZ / 2; // Text log every 0.5 s.
+    const uint32_t exo_telemetry_every = LOOP_HZ >= 50 ? LOOP_HZ / 50 : 1; // EXO telemetry <= 50 Hz.
+    const uint32_t imu_telemetry_every = LOOP_HZ >= 25 ? LOOP_HZ / 25 : 1; // IMU2 telemetry <= 25 Hz.
     witmotion_data_t  imu{};
-    witmotion_data_t  thigh_imu{};
     witmotion_data_t  shank_imu{};
     rs02_feedback_t   fb{};
     StateMachine sm{};
     float joint_torque_cmd_filtered = 0.0f;
 
     load_runtime_params_once();
+    battery_adc_init();
     log_gravity_id_points();
 
 #if CONFIG_KNEEEXO_WEAR_MODE_DAMPING
@@ -486,15 +598,23 @@ extern "C" void control_task(void *arg)
 #endif
 
     while (true) {
-        const bool thigh_ok = (witmotion_get_latest_channel(IMU1_UART_NUM, &thigh_imu) == ESP_OK);
         const bool shank_ok = (witmotion_get_latest_channel(IMU2_UART_NUM, &shank_imu) == ESP_OK);
         imu = shank_imu;
         const bool imu_ok = shank_ok;
-        const bool motor_ok = (rs02_get_feedback(&g_motor, &fb, 0) == ESP_OK);
+        const bool motor_read_ok = (rs02_get_feedback(&g_motor, &fb, 0) == ESP_OK);
+        const int64_t now_us = esp_timer_get_time();
+        const float motor_age_ms = (motor_read_ok && fb.ts_us > 0)
+                                 ? (float)(now_us - fb.ts_us) / 1000.0f
+                                 : NAN;
+        const bool motor_ok = motor_read_ok
+                           && fb.ts_us > 0
+                           && motor_age_ms >= 0.0f
+                           && motor_age_ms < 120.0f;
 
         const float joint_mech_pos = motor_to_joint_rad(fb.position_rad);
         const float joint_user_pos = joint_mech_pos - g_user_zero_offset_rad;
         const float joint_vel = motor_to_joint_vel(fb.velocity_rad_s);
+        const float joint_fb_torque = motor_ok ? motor_to_joint_torque(fb.torque_nm) : NAN;
 
         if (g_req_zero_motor && motor_ok) {
             g_user_zero_offset_rad = joint_mech_pos;
@@ -511,45 +631,75 @@ extern "C" void control_task(void *arg)
         }
 
         const MotionFeatures feat = update_features(imu, fb, imu_ok, motor_ok,
-                                                    joint_mech_pos, joint_vel);
+                                                    joint_user_pos, joint_vel);
+        static float battery_voltage_lp = NAN;
+        const float battery_voltage = battery_voltage_read();
+        if (battery_voltage == battery_voltage) {
+            battery_voltage_lp = (battery_voltage_lp == battery_voltage_lp)
+                               ? (0.95f * battery_voltage_lp + 0.05f * battery_voltage)
+                               : battery_voltage;
+        }
         update_state_machine(sm, feat);
 
         const float shank_pitch_rad = feat.shank_pitch_deg * DEG_TO_RAD;
-        const float joint_gravity_ff = gravity_comp_torque(shank_pitch_rad);
+        float joint_gravity_ff = gravity_comp_torque(shank_pitch_rad);
         float joint_torque_ff = joint_gravity_ff;
         float joint_impedance_torque = 0.0f;
 
         const ImpedanceParams ip = g_state_impedance_enabled
                                  ? params_for_state(sm.state, sm.loops_in_state)
                                  : ImpedanceParams{0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
-        joint_impedance_torque =
-            ip.k_nm_per_rad * (ip.theta_eq_rad - joint_mech_pos)
-          - ip.b_nm_s_per_rad * joint_vel
-          + ip.torque_ff_nm;
-        joint_impedance_torque = clamp_float(joint_impedance_torque,
-                                             -ip.torque_limit_nm,
-                                             ip.torque_limit_nm);
-        joint_torque_ff += joint_impedance_torque;
+        const uint8_t manual_mode = (!g_force_safe && motor_ok && !fb.has_fault) ? g_manual_mode : 0;
+        if (manual_mode == 1) {
+            joint_gravity_ff = 0.0f;
+            joint_impedance_torque = clamp_float(g_manual_torque_nm,
+                                                 -MANUAL_TORQUE_MAX_NM,
+                                                 MANUAL_TORQUE_MAX_NM);
+            joint_torque_ff = joint_impedance_torque;
+        } else if (manual_mode == 2) {
+            const float target_mech = g_user_zero_offset_rad + g_manual_pos_user_rad;
+            const float k_manual = clamp_float(g_manual_k_nm_per_rad, 0.0f, MANUAL_POS_K_MAX);
+            const float b_manual = clamp_float(g_manual_b_nm_s_per_rad, 0.0f, MANUAL_POS_B_MAX);
+            const float lim_manual = clamp_float(g_manual_limit_nm, 0.0f, MANUAL_TORQUE_MAX_NM);
+            joint_impedance_torque =
+                k_manual * (target_mech - joint_mech_pos)
+              - b_manual * joint_vel;
+            joint_impedance_torque = clamp_float(joint_impedance_torque,
+                                                 -lim_manual,
+                                                 lim_manual);
+            joint_torque_ff += joint_impedance_torque;
+        } else {
+            joint_impedance_torque =
+                ip.k_nm_per_rad * (ip.theta_eq_rad - joint_user_pos)
+              - ip.b_nm_s_per_rad * joint_vel
+              + ip.torque_ff_nm;
+            joint_impedance_torque = clamp_float(joint_impedance_torque,
+                                                 -ip.torque_limit_nm,
+                                                 ip.torque_limit_nm);
+            joint_torque_ff += joint_impedance_torque;
+        }
 
 #if CONFIG_KNEEEXO_WEAR_MODE_DAMPING
-        const float wear_torque = clamp_float(-damping_b * joint_vel,
-                                              -damping_torque_max,
-                                              damping_torque_max);
-        joint_torque_ff += wear_torque;
+        if (manual_mode == 0) {
+            const float wear_torque = clamp_float(-damping_b * joint_vel,
+                                                  -damping_torque_max,
+                                                  damping_torque_max);
+            joint_torque_ff += wear_torque;
+        }
 #elif CONFIG_KNEEEXO_WEAR_MODE_ASSIST
-        if (fabsf(joint_vel) > assist_vel_deadband) {
+        if (manual_mode == 0 && fabsf(joint_vel) > assist_vel_deadband) {
             const float wear_torque = clamp_float(assist_b * joint_vel,
                                                   -assist_torque_max,
                                                   assist_torque_max);
             joint_torque_ff += wear_torque;
         }
 
-        // 落地缓冲的无 IMU 近似：
-        // 关节靠近伸膝端，且正在较快屈膝时，给伸膝方向的反向阻尼，减小“砸弯”感。
+        // 钀藉湴缂撳啿鐨勬棤 IMU 杩戜技锛?
+        // 鍏宠妭闈犺繎浼歌啙绔紝涓旀鍦ㄨ緝蹇眻鑶濇椂锛岀粰浼歌啙鏂瑰悜鐨勫弽鍚戦樆灏硷紝鍑忓皬鈥滅牳寮€濇劅銆?
         const bool near_extension = joint_mech_pos > (KNEE_EXT_LIMIT_RAD + SOFT_LIMIT_MARGIN_RAD)
                                  && joint_mech_pos < (KNEE_EXT_LIMIT_RAD + buffer_near_ext);
         const bool fast_flexion = joint_vel > buffer_min_flex_vel;
-        if (near_extension && fast_flexion) {
+        if (manual_mode == 0 && near_extension && fast_flexion) {
             const float buffer_torque = -clamp_float(buffer_b * joint_vel,
                                                      0.0f,
                                                      buffer_torque_max);
@@ -557,7 +707,7 @@ extern "C" void control_task(void *arg)
         }
 #endif
 
-        // 软限位保护使用机械 joint 坐标，不受 user zero 影响。
+        // 杞檺浣嶄繚鎶や娇鐢ㄦ満姊?joint 鍧愭爣锛屼笉鍙?user zero 褰卞搷銆?
         if (joint_mech_pos <= KNEE_EXT_LIMIT_RAD + SOFT_LIMIT_MARGIN_RAD && joint_torque_ff < 0.0f) {
             joint_torque_ff = 0.0f;
         }
@@ -582,7 +732,7 @@ extern "C" void control_task(void *arg)
             ESP_LOGI(TAG,
                      "state=%s shank=%+6.2f deg | joint_user=%+6.3f rad (%+6.1f deg) "
                      "joint_mech=%+6.3f vel=%+6.3f tq_cmd=%+5.2f grav=%+5.2f imp=%+5.2f "
-                     "fb_tq=%+5.2f acc=%.2fg impact=%+.2fg T=%4.1f%s",
+                     "fb_tq=%+5.2f acc=%.2fg impact=%+.2fg bat=%.2fV motor_age=%.1fms T=%4.1f%s",
                      exo_state_name(sm.state),
                      feat.shank_pitch_deg,
                      joint_user_pos, joint_user_pos * RAD_TO_DEG,
@@ -591,42 +741,47 @@ extern "C" void control_task(void *arg)
                      joint_torque_cmd_filtered,
                      joint_gravity_ff,
                      joint_impedance_torque,
-                     motor_to_joint_torque(fb.torque_nm),
+                     joint_fb_torque,
                      feat.acc_norm_g,
                      feat.impact_g,
+                     battery_voltage_lp,
+                     motor_age_ms,
                      fb.temperature_c,
                      fb.has_fault ? " FAULT!" : "");
         }
 
-        if ((loop_count % telemetry_every) == 0) {
-            if (thigh_ok) {
-                print_imu_telemetry("$IMU1", thigh_imu);
-            }
+        if ((loop_count % imu_telemetry_every) == 0) {
             if (shank_ok) {
-                print_imu_telemetry("$IMU2", shank_imu);
+                print_imu_telemetry("$IMU2", shank_imu, now_us);
             }
+        }
+        if ((loop_count % exo_telemetry_every) == 0) {
             printf("$EXO,%lld,%s,"
                    "%.3f,%.3f,%.3f,"
                    "%.3f,%.3f,"
                    "%.3f,%.3f,%.3f,%.3f,"
-                   "%.3f,%.3f,%.3f,%d,%d,%d\n",
-                   (long long)esp_timer_get_time(),
+                   "%.3f,%.3f,%.3f,%d,%d,%d,%.3f,%.1f,%d,%.3f\n",
+                   (long long)now_us,
                    exo_state_name(sm.state),
                    feat.shank_pitch_deg,
-                   feat.shank_pitch_rate_dps,
+                   feat.shank_pitch_rate_lp_dps,
                    feat.acc_norm_g,
-                   joint_mech_pos,
+                   joint_user_pos,
                    joint_vel,
                    joint_gravity_ff,
                    joint_impedance_torque,
                    joint_torque_cmd_filtered,
-                   motor_to_joint_torque(fb.torque_nm),
+                   joint_fb_torque,
                    ip.k_nm_per_rad,
                    ip.b_nm_s_per_rad,
                    ip.theta_eq_rad,
                    feat.landing_event ? 1 : 0,
                    feat.knee_flexion_peak ? 1 : 0,
-                   feat.shank_vertical_cross ? 1 : 0);
+                   feat.shank_vertical_cross ? 1 : 0,
+                   battery_voltage_lp,
+                   motor_age_ms,
+                   motor_ok ? 1 : 0,
+                   feat.impact_g);
             fflush(stdout);
         }
 
@@ -670,6 +825,10 @@ extern "C" void command_task(void *arg)
             printf("$ACK,REQ_ZERO_MOTOR\n");
         } else if (strncmp(cmd, "SAFE,", 5) == 0) {
             g_force_safe = atoi(cmd + 5) != 0;
+            if (g_force_safe) {
+                g_manual_mode = 0;
+                g_manual_torque_nm = 0.0f;
+            }
             printf("$ACK,SAFE,%d\n", g_force_safe ? 1 : 0);
         } else if (strncmp(cmd, "SET_GRAV,", 9) == 0) {
             float G = 0.0f;
@@ -716,6 +875,43 @@ extern "C" void command_task(void *arg)
                     printf("$ERR,STATE_LOCK,unknown\n");
                 }
             }
+        } else if (strcmp(cmd, "MANUAL_OFF") == 0) {
+            g_manual_mode = 0;
+            g_manual_torque_nm = 0.0f;
+            printf("$ACK,MANUAL_OFF\n");
+        } else if (strncmp(cmd, "MANUAL_TORQUE,", 14) == 0) {
+            float torque_nm = 0.0f;
+            if (sscanf(cmd + 14, "%f", &torque_nm) == 1
+                && torque_nm >= -MANUAL_TORQUE_MAX_NM
+                && torque_nm <= MANUAL_TORQUE_MAX_NM) {
+                g_manual_torque_nm = torque_nm;
+                g_manual_mode = 1;
+                printf("$ACK,MANUAL_TORQUE,%.4f\n", g_manual_torque_nm);
+            } else {
+                printf("$ERR,MANUAL_TORQUE,range_%.1fNm\n", MANUAL_TORQUE_MAX_NM);
+            }
+        } else if (strncmp(cmd, "MANUAL_POS,", 11) == 0) {
+            float pos_deg = 0.0f;
+            float k = 3.0f;
+            float b = 0.25f;
+            float lim = 1.0f;
+            const int count = sscanf(cmd + 11, "%f,%f,%f,%f", &pos_deg, &k, &b, &lim);
+            if (count >= 1
+                && pos_deg >= -10.0f && pos_deg <= 100.0f
+                && k >= 0.0f && k <= MANUAL_POS_K_MAX
+                && b >= 0.0f && b <= MANUAL_POS_B_MAX
+                && lim >= 0.0f && lim <= MANUAL_TORQUE_MAX_NM) {
+                g_manual_pos_user_rad = pos_deg * DEG_TO_RAD;
+                g_manual_k_nm_per_rad = k;
+                g_manual_b_nm_s_per_rad = b;
+                g_manual_limit_nm = lim;
+                g_manual_mode = 2;
+                printf("$ACK,MANUAL_POS,deg=%.2f,K=%.3f,B=%.3f,limit=%.3f\n",
+                       pos_deg, k, b, lim);
+            } else {
+                printf("$ERR,MANUAL_POS,pos_-10_100deg_K_0_%.1f_B_0_%.1f_lim_0_%.1f\n",
+                       MANUAL_POS_K_MAX, MANUAL_POS_B_MAX, MANUAL_TORQUE_MAX_NM);
+            }
         } else if (strncmp(cmd, "SET_THRESH,", 11) == 0) {
             float impact = 0.0f;
             float swing = 0.0f;
@@ -731,8 +927,9 @@ extern "C" void command_task(void *arg)
                 printf("$ERR,SET_THRESH,parse_or_range\n");
             }
         } else if (strcmp(cmd, "GET_PARAMS") == 0) {
-            printf("$ACK,PARAMS,imu_zero=%.6f,G=%.6f,phi=%.6f,bias=%.6f,grav_en=%d,state_ctrl=%d,state_lock=%d,impact=%.6f,swing=%.3f\n",
+            printf("$ACK,PARAMS,imu_zero=%.6f,motor_zero=%.6f,G=%.6f,phi=%.6f,bias=%.6f,grav_en=%d,state_ctrl=%d,state_lock=%d,impact=%.6f,swing=%.3f\n",
                    g_shank_pitch_zero_deg,
+                   g_user_zero_offset_rad,
                    g_gravity_G_nm,
                    g_gravity_phi_rad,
                    g_gravity_bias_nm,

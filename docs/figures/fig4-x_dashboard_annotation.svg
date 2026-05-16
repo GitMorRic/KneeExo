@@ -1,0 +1,179 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="920" viewBox="0 0 1500 920">
+  <defs>
+    <style>
+      .bg { fill: #f6f7f9; }
+      .panel { fill: #ffffff; stroke: #cfd6df; stroke-width: 1.5; }
+      .plot { fill: #ffffff; stroke: #d4d9df; stroke-width: 1.2; }
+      .grid { stroke: #e5e9ef; stroke-width: 1; }
+      .axis { stroke: #7c8794; stroke-width: 1.2; }
+      .line-b { fill: none; stroke: #2563eb; stroke-width: 2.2; }
+      .line-o { fill: none; stroke: #f97316; stroke-width: 2.2; }
+      .line-g { fill: none; stroke: #16a34a; stroke-width: 2.2; }
+      .line-r { fill: none; stroke: #dc2626; stroke-width: 2.2; }
+      .title { font: 700 25px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #111827; }
+      .sub { font: 16px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #4b5563; }
+      .label { font: 16px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #111827; }
+      .small { font: 13px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #374151; }
+      .tiny { font: 11px Consolas, "Microsoft YaHei", monospace; fill: #4b5563; }
+      .note { font: 15px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #0f172a; }
+      .tag { fill: #eef6ff; stroke: #2f80ed; stroke-width: 1.5; }
+      .tag2 { fill: #fff7ed; stroke: #f97316; stroke-width: 1.5; }
+      .tag3 { fill: #f0fdf4; stroke: #22c55e; stroke-width: 1.5; }
+      .tag4 { fill: #fef2f2; stroke: #ef4444; stroke-width: 1.5; }
+      .tag5 { fill: #f5f3ff; stroke: #8b5cf6; stroke-width: 1.5; }
+      .arrow { stroke: #2563eb; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+      .arrow-o { stroke: #f97316; stroke-width: 2; fill: none; marker-end: url(#arrow-o); }
+      .arrow-g { stroke: #16a34a; stroke-width: 2; fill: none; marker-end: url(#arrow-g); }
+      .button { fill: #e5e7eb; stroke: #9ca3af; stroke-width: 1; rx: 2; }
+      .input { fill: #ffffff; stroke: #9ca3af; stroke-width: 1; }
+    </style>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#2563eb"/>
+    </marker>
+    <marker id="arrow-o" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#f97316"/>
+    </marker>
+    <marker id="arrow-g" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#16a34a"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1500" height="920"/>
+  <text x="28" y="42" class="title">KneeExo 上位机调试平台功能分区示意图</text>
+  <text x="28" y="70" class="sub">用于实时遥测显示、状态机调试、重力补偿标定、阈值整定、数据记录与实验报告导出</text>
+
+  <rect x="24" y="92" width="930" height="748" class="panel"/>
+  <rect x="980" y="92" width="300" height="748" class="panel"/>
+  <rect x="1310" y="92" width="160" height="748" class="panel"/>
+
+  <text x="455" y="122" class="label">实时曲线显示区</text>
+
+  <g id="plots">
+    <rect x="52" y="145" width="870" height="112" class="plot"/>
+    <rect x="52" y="280" width="870" height="112" class="plot"/>
+    <rect x="52" y="415" width="870" height="112" class="plot"/>
+    <rect x="52" y="550" width="870" height="112" class="plot"/>
+    <rect x="52" y="685" width="870" height="112" class="plot"/>
+    <g>
+      <path class="grid" d="M52 177H922 M52 209H922 M196 145V257 M340 145V257 M484 145V257 M628 145V257 M772 145V257"/>
+      <path class="grid" d="M52 312H922 M52 344H922 M196 280V392 M340 280V392 M484 280V392 M628 280V392 M772 280V392"/>
+      <path class="grid" d="M52 447H922 M52 479H922 M196 415V527 M340 415V527 M484 415V527 M628 415V527 M772 415V527"/>
+      <path class="grid" d="M52 582H922 M52 614H922 M196 550V662 M340 550V662 M484 550V662 M628 550V662 M772 550V662"/>
+      <path class="grid" d="M52 717H922 M52 749H922 M196 685V797 M340 685V797 M484 685V797 M628 685V797 M772 685V797"/>
+    </g>
+    <text x="468" y="137" class="small">acc：加速度与冲击特征</text>
+    <text x="435" y="272" class="small">gyro/euler：IMU姿态角与小腿角</text>
+    <text x="475" y="407" class="small">knee：膝关节角度 / 角速度</text>
+    <text x="445" y="542" class="small">torque/params：重力补偿、阻抗、输出力矩</text>
+    <text x="485" y="677" class="small">power：电池电压与系统状态</text>
+
+    <path class="line-b" d="M75 205 C140 160 210 245 285 190 S430 175 505 220 S640 165 720 210 S840 175 900 200"/>
+    <path class="line-o" d="M75 222 C140 240 205 175 285 232 S430 235 505 180 S645 235 720 188 S840 228 900 215"/>
+    <path class="line-g" d="M75 198 C210 190 350 205 485 197 S735 203 900 194"/>
+    <path class="line-r" d="M75 174 C240 178 345 170 505 176 S665 168 900 175"/>
+
+    <path class="line-o" d="M75 325 C160 300 225 365 300 325 S420 300 495 345 S645 300 735 330 S825 355 900 320"/>
+    <path class="line-g" d="M75 350 C150 315 230 360 305 335 S430 315 505 360 S645 315 720 345 S820 370 900 335"/>
+    <path class="line-r" d="M75 346 C150 312 230 356 305 332 S430 312 505 356 S645 312 720 342 S820 366 900 332"/>
+
+    <path class="line-b" d="M75 440 C150 505 220 455 290 485 S430 430 505 500 S650 435 720 492 S840 435 900 475"/>
+    <path class="line-o" d="M75 506 C240 506 370 498 500 505 S760 500 900 505"/>
+
+    <path class="line-g" d="M75 610 C150 620 210 560 290 615 S430 585 505 610 S650 555 720 618 S840 575 900 605"/>
+    <path class="line-r" d="M75 615 C150 580 210 635 290 585 S430 620 505 590 S650 630 720 575 S840 620 900 570"/>
+    <path class="line-o" d="M75 600 C140 570 230 640 300 595 S430 620 505 585 S645 635 720 580 S840 615 900 565"/>
+    <path class="line-b" d="M75 606 H900"/>
+
+    <path class="line-b" d="M75 735 H900"/>
+  </g>
+
+  <rect x="28" y="848" width="1450" height="50" class="panel"/>
+  <text x="42" y="868" class="tiny">latest | ax=+0.34 ay=-0.92 az=+0.15 g | thigh=+14.7 pitch=-17.8 shank=-15.5 deg | knee=+44.7 deg vel=+0.50 rad/s | tau_cmd=+0.10 tau_fb=+0.24 Nm | bat=18.23 V motor_ok=1</text>
+  <text x="42" y="890" class="tiny" fill="#7c3aed">state=SAFE | Safe passive: gravity ff + low impedance | K=0.00 B=0.04 theta_eq=0.0 deg tau_g=-0.01 tau_imp=+0.02 tau_cmd=+0.10</text>
+
+  <text x="1070" y="122" class="label">控制与标定区</text>
+  <g id="buttons">
+    <rect x="1005" y="145" width="125" height="24" class="button"/><text x="1042" y="162" class="small">Zero IMU</text>
+    <rect x="1140" y="145" width="125" height="24" class="button"/><text x="1171" y="162" class="small">Zero Motor</text>
+    <rect x="1005" y="180" width="125" height="24" class="button"/><text x="1046" y="197" class="small">SAFE on</text>
+    <rect x="1140" y="180" width="125" height="24" class="button"/><text x="1184" y="197" class="small">SAFE off</text>
+    <rect x="1005" y="215" width="125" height="24" class="button"/><text x="1047" y="232" class="small">State on</text>
+    <rect x="1140" y="215" width="125" height="24" class="button"/><text x="1182" y="232" class="small">State off</text>
+    <rect x="1005" y="250" width="125" height="24" class="button"/><text x="1047" y="267" class="small">Auto FSM</text>
+    <rect x="1140" y="250" width="125" height="24" class="button"/><text x="1172" y="267" class="small">Lock SAFE</text>
+    <rect x="1005" y="285" width="125" height="24" class="button"/><text x="1048" y="302" class="small">Lock IDS</text>
+    <rect x="1140" y="285" width="125" height="24" class="button"/><text x="1166" y="302" class="small">Lock SINGLE</text>
+    <rect x="1005" y="320" width="125" height="24" class="button"/><text x="1048" y="337" class="small">Lock ISW</text>
+    <rect x="1140" y="320" width="125" height="24" class="button"/><text x="1173" y="337" class="small">Lock MSW</text>
+    <rect x="1005" y="355" width="125" height="24" class="button"/><text x="1048" y="372" class="small">Lock TSW</text>
+    <rect x="1140" y="355" width="125" height="24" class="button"/><text x="1181" y="372" class="small">G sample</text>
+    <rect x="1005" y="390" width="125" height="24" class="button"/><text x="1048" y="407" class="small">G fit</text>
+    <rect x="1140" y="390" width="125" height="24" class="button"/><text x="1184" y="407" class="small">G send</text>
+    <rect x="1005" y="425" width="125" height="24" class="button"/><text x="1048" y="442" class="small">G on</text>
+    <rect x="1140" y="425" width="125" height="24" class="button"/><text x="1187" y="442" class="small">G off</text>
+    <rect x="1005" y="460" width="125" height="24" class="button"/><text x="1045" y="477" class="small">G apply</text>
+    <rect x="1140" y="460" width="125" height="24" class="button"/><text x="1176" y="477" class="small">Save params</text>
+    <rect x="1005" y="495" width="125" height="24" class="button"/><text x="1048" y="512" class="small">T fit</text>
+    <rect x="1140" y="495" width="125" height="24" class="button"/><text x="1185" y="512" class="small">T send</text>
+    <rect x="1005" y="530" width="125" height="24" class="button"/><text x="1048" y="547" class="small">Report</text>
+    <rect x="1140" y="530" width="125" height="24" class="button"/><text x="1183" y="547" class="small">G clear</text>
+  </g>
+
+  <g id="inputs">
+    <text x="1005" y="585" class="small">G</text><rect x="1045" y="568" width="120" height="24" class="input"/><text x="1052" y="585" class="tiny">0.0</text>
+    <text x="1005" y="620" class="small">phi</text><rect x="1045" y="603" width="120" height="24" class="input"/><text x="1052" y="620" class="tiny">0.0</text>
+    <text x="1005" y="655" class="small">bias</text><rect x="1045" y="638" width="120" height="24" class="input"/><text x="1052" y="655" class="tiny">0.0</text>
+    <text x="1005" y="690" class="small">impact</text><rect x="1080" y="673" width="85" height="24" class="input"/><text x="1087" y="690" class="tiny">0.18</text>
+    <text x="1005" y="725" class="small">swing</text><rect x="1080" y="708" width="85" height="24" class="input"/><text x="1087" y="725" class="tiny">35.0</text>
+  </g>
+
+  <text x="1328" y="122" class="label">信号选择区</text>
+  <g id="checks">
+    <text x="1330" y="155" class="small">☑ acc_g</text>
+    <text x="1330" y="183" class="small">☑ ax / ay / az</text>
+    <text x="1330" y="211" class="small">☑ pitch</text>
+    <text x="1330" y="239" class="small">☑ shank_deg</text>
+    <text x="1330" y="267" class="small">☑ knee_rad</text>
+    <text x="1330" y="295" class="small">☑ knee_vel</text>
+    <text x="1330" y="323" class="small">☑ tau_g</text>
+    <text x="1330" y="351" class="small">☑ tau_imp</text>
+    <text x="1330" y="379" class="small">☑ tau_cmd</text>
+    <text x="1330" y="407" class="small">☑ tau_fb</text>
+    <text x="1330" y="435" class="small">☑ bat_v</text>
+    <text x="1330" y="463" class="small">☐ k / b / theta_eq</text>
+  </g>
+
+  <g id="annotations">
+    <rect x="160" y="18" width="250" height="64" rx="8" class="tag"/>
+    <text x="178" y="43" class="note">标题状态栏</text>
+    <text x="178" y="65" class="small">帧数、数据来源、FSM状态、零位状态</text>
+    <path d="M285 82 C320 110 350 118 420 122" class="arrow"/>
+
+    <rect x="108" y="822" width="305" height="58" rx="8" class="tag5"/>
+    <text x="126" y="846" class="note">最新遥测与状态说明</text>
+    <text x="126" y="868" class="small">显示数值、状态解释、当前K/B/力矩组成</text>
+    <path d="M415 850 C560 815 760 850 920 872" class="arrow"/>
+
+    <rect x="700" y="18" width="260" height="64" rx="8" class="tag3"/>
+    <text x="718" y="43" class="note">多通道曲线区</text>
+    <text x="718" y="65" class="small">用于观察传感、状态和力矩响应</text>
+    <path d="M820 82 C840 110 820 128 790 150" class="arrow-g"/>
+
+    <rect x="1010" y="18" width="270" height="64" rx="8" class="tag2"/>
+    <text x="1028" y="43" class="note">模式切换与标定按钮</text>
+    <text x="1028" y="65" class="small">零位、SAFE、状态锁定、G/T标定</text>
+    <path d="M1120 82 C1110 105 1105 122 1090 145" class="arrow-o"/>
+
+    <rect x="1198" y="805" width="255" height="64" rx="8" class="tag2"/>
+    <text x="1216" y="830" class="note">参数输入区</text>
+    <text x="1216" y="852" class="small">重力补偿、冲击阈值、摆动阈值</text>
+    <path d="M1195 815 C1148 760 1135 720 1125 675" class="arrow-o"/>
+
+    <rect x="1260" y="18" width="220" height="64" rx="8" class="tag4"/>
+    <text x="1278" y="43" class="note">信号筛选区</text>
+    <text x="1278" y="65" class="small">按实验目标选择绘制变量</text>
+    <path d="M1370 82 C1370 110 1370 120 1370 145" class="arrow"/>
+  </g>
+
+  <text x="52" y="885" class="small">图注建议：上位机调试平台由实时曲线显示区、控制与标定区、信号选择区以及遥测状态输出区组成。</text>
+</svg>

@@ -63,6 +63,9 @@ EXO_FIELDS = [
     "landing",
     "flex_peak",
     "shank_cross",
+    "bat_v",
+    "motor_age_ms",
+    "motor_ok",
 ]
 
 IMU_RE = re.compile(r"^\$IMU(?P<idx>[12]?),(?P<body>.+)\s*$")
@@ -323,11 +326,17 @@ def parse_exo(line: str) -> dict[str, object] | None:
     if not m:
         return None
     p = m.group("body").split(",")
-    if len(p) != 17:
+    if len(p) not in (17, 18, 20):
         return None
     row: dict[str, object] = {"t_us": int(p[0]), "state": p[1]}
     for name, value in zip(EXO_FIELDS[1:], p[2:]):
         row[name] = float(value)
+    if "bat_v" not in row:
+        row["bat_v"] = float("nan")
+    if "motor_age_ms" not in row:
+        row["motor_age_ms"] = float("nan")
+    if "motor_ok" not in row:
+        row["motor_ok"] = float("nan")
     return row
 
 
@@ -438,7 +447,7 @@ def main() -> None:
         "imu_shank_deg": True, "shank_deg": True, "shank_rate_dps": False,
         "acc_g": True, "knee_rad": True, "knee_vel": True,
         "tau_g": True, "tau_imp": True, "tau_cmd": True, "tau_fb": True,
-        "k": False, "b": False, "theta_eq": False,
+        "k": False, "b": False, "theta_eq": False, "bat_v": True,
     }
     imu_zero = {"offset": 0.0, "set": False}
     labels = list(selected.keys())
@@ -733,7 +742,8 @@ def main() -> None:
             f"ax={latest('ax'):+.2f} ay={latest('ay'):+.2f} az={latest('az'):+.2f} g | "
             f"thigh={latest('thigh_pitch'):+.1f} pitch={latest('pitch'):+.1f} yaw={latest('yaw'):+.1f} shank={shank_latest:+.1f} deg | "
             f"knee={latest('knee_rad')*57.2958:+.1f} deg vel={latest('knee_vel'):+.2f} rad/s | "
-            f"tau_cmd={latest('tau_cmd'):+.2f} tau_fb={latest('tau_fb'):+.2f} Nm"
+            f"tau_cmd={latest('tau_cmd'):+.2f} tau_fb={latest('tau_fb'):+.2f} Nm | "
+            f"bat={latest('bat_v'):.2f} V motor_age={latest('motor_age_ms'):.0f} ms ok={latest('motor_ok'):.0f}"
         )
         if control_line != "commands: ready":
             cmd_status["text"] = control_line

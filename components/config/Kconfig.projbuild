@@ -198,7 +198,7 @@ menu "KneeExo Application"
 
     config KNEEEXO_GAIT_IMPACT_SPIKE_X100
         int "gait: landing impact spike threshold (g x100)"
-        default 18
+        default 8
         range 5 300
         depends on KNEEEXO_GAIT_IMU_ENABLE
         help

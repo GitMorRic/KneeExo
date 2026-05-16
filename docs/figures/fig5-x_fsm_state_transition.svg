@@ -1,0 +1,111 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="900" viewBox="0 0 1500 900">
+  <defs>
+    <style>
+      .bg { fill: #ffffff; }
+      .title { font: 700 30px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #111827; }
+      .subtitle { font: 17px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #4b5563; }
+      .state { fill: #f8fafc; stroke: #334155; stroke-width: 2.2; }
+      .safe { fill: #fff1f2; stroke: #dc2626; stroke-width: 3; }
+      .text { font: 700 21px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #0f172a; text-anchor: middle; }
+      .sub { font: 14px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #475569; text-anchor: middle; }
+      .cond { font: 14px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #1f2937; }
+      .small { font: 13px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #374151; }
+      .arrow { stroke: #2563eb; stroke-width: 2.4; fill: none; marker-end: url(#arrow-blue); }
+      .loop { stroke: #16a34a; stroke-width: 2.4; fill: none; marker-end: url(#arrow-green); }
+      .fault { stroke: #dc2626; stroke-width: 2.1; fill: none; stroke-dasharray: 8 6; marker-end: url(#arrow-red); }
+      .note { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1.5; rx: 10; }
+      .legend-blue { stroke: #2563eb; stroke-width: 3; fill: none; marker-end: url(#arrow-blue); }
+      .legend-red { stroke: #dc2626; stroke-width: 3; fill: none; stroke-dasharray: 8 6; marker-end: url(#arrow-red); }
+    </style>
+    <marker id="arrow-blue" markerWidth="12" markerHeight="12" refX="10" refY="4" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,8 L11,4 z" fill="#2563eb"/>
+    </marker>
+    <marker id="arrow-green" markerWidth="12" markerHeight="12" refX="10" refY="4" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,8 L11,4 z" fill="#16a34a"/>
+    </marker>
+    <marker id="arrow-red" markerWidth="12" markerHeight="12" refX="10" refY="4" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,8 L11,4 z" fill="#dc2626"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1500" height="900"/>
+  <text x="750" y="52" class="title" text-anchor="middle">图 5-X 有限状态机状态转移图</text>
+  <text x="750" y="84" class="subtitle" text-anchor="middle">正常状态转移基于实时物理特征；安全模式具有最高优先级，可中断任意状态</text>
+
+  <g id="states">
+    <rect x="90" y="360" width="190" height="100" rx="18" class="safe"/>
+    <text x="185" y="397" class="text">SAFE</text>
+    <text x="185" y="424" class="sub">安全模式</text>
+    <text x="185" y="446" class="sub">低阻抗/必要重力补偿</text>
+
+    <rect x="345" y="155" width="190" height="100" rx="18" class="state"/>
+    <text x="440" y="192" class="text">IDS</text>
+    <text x="440" y="219" class="sub">初始双支撑</text>
+    <text x="440" y="241" class="sub">落地缓冲</text>
+
+    <rect x="650" y="155" width="210" height="100" rx="18" class="state"/>
+    <text x="755" y="192" class="text">SINGLE</text>
+    <text x="755" y="219" class="sub">单支撑估计</text>
+    <text x="755" y="241" class="sub">高刚度/高阻尼</text>
+
+    <rect x="1015" y="155" width="190" height="100" rx="18" class="state"/>
+    <text x="1110" y="192" class="text">ISWING</text>
+    <text x="1110" y="219" class="sub">初始摆动</text>
+    <text x="1110" y="241" class="sub">后摆/屈膝</text>
+
+    <rect x="1015" y="585" width="190" height="100" rx="18" class="state"/>
+    <text x="1110" y="622" class="text">MSWING</text>
+    <text x="1110" y="649" class="sub">摆动中期</text>
+    <text x="1110" y="671" class="sub">透明跟随</text>
+
+    <rect x="650" y="585" width="210" height="100" rx="18" class="state"/>
+    <text x="755" y="622" class="text">TSWING</text>
+    <text x="755" y="649" class="sub">摆动末期</text>
+    <text x="755" y="671" class="sub">阻尼减速</text>
+  </g>
+
+  <g id="normal-arrows">
+    <path d="M280 386 C305 300 335 245 377 218" class="arrow"/>
+    <text x="225" y="303" class="cond">上电完成/人工解除 SAFE</text>
+    <text x="225" y="325" class="cond">传感器与电机反馈正常</text>
+
+    <path d="M535 205 H650" class="arrow"/>
+    <text x="556" y="182" class="cond">冲击后稳定</text>
+    <text x="556" y="204" class="cond">角度在安全范围</text>
+
+    <path d="M860 205 H1015" class="arrow"/>
+    <text x="892" y="182" class="cond">小腿后摆</text>
+    <text x="892" y="204" class="cond">ωs &lt; -ωswing, θs &lt; θback</text>
+
+    <path d="M1110 255 V585" class="arrow"/>
+    <text x="1130" y="407" class="cond">最大屈膝点</text>
+    <text x="1130" y="429" class="cond">q̇k 由正转负</text>
+
+    <path d="M1015 635 H860" class="arrow"/>
+    <text x="875" y="614" class="cond">小腿前摆/伸膝趋势</text>
+    <text x="875" y="636" class="cond">θs &gt; θforward 或 qk &lt; qextend</text>
+
+    <path d="M650 635 C525 630 420 560 405 460 C390 360 405 290 430 255" class="loop"/>
+    <text x="405" y="610" class="cond">落地冲击</text>
+    <text x="405" y="632" class="cond">Δa &gt; aimpact</text>
+  </g>
+
+  <g id="fault-arrows">
+    <path d="M345 205 C250 220 190 285 185 360" class="fault"/>
+    <path d="M650 205 C420 220 220 285 195 360" class="fault"/>
+    <path d="M1015 205 C650 235 280 300 205 360" class="fault"/>
+    <path d="M1015 635 C680 650 300 540 220 455" class="fault"/>
+    <path d="M650 635 C455 625 260 530 210 455" class="fault"/>
+    <text x="448" y="340" class="cond" fill="#dc2626">任意状态：E_fault=1 → SAFE</text>
+    <text x="448" y="364" class="cond" fill="#dc2626">角度超限 / 电机反馈超时 / 传感器异常 / 状态超时 / 急停</text>
+  </g>
+
+  <g id="notes">
+    <rect x="80" y="735" width="1340" height="104" class="note"/>
+    <text x="110" y="765" class="small">说明：</text>
+    <text x="165" y="765" class="small">蓝色箭头表示基于实时物理特征的正常状态转移；绿色箭头表示步态周期闭环；红色虚线表示安全回退路径。</text>
+    <text x="165" y="794" class="small">状态转移条件不依赖固定步态时间百分比，而是由小腿姿态角 θs、小腿角速度 ωs、加速度冲击残差 Δa、膝关节角度 qk 和角速度 q̇k 共同判断。</text>
+    <path d="M1080 820 H1145" class="legend-blue"/><text x="1160" y="825" class="small">正常转移</text>
+    <path d="M1260 820 H1325" class="legend-red"/><text x="1340" y="825" class="small">安全回退</text>
+  </g>
+</svg>
