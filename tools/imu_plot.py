@@ -3,9 +3,10 @@ tools/imu_plot.py
 =================
 
 PC 端实时绘图，配合 KneeExo 固件 profile = imu_only：
-  - 固件每 10ms 通过主串口（UART0/USB-CDC）打印一行 CSV：
-      $IMU,t_us,ax,ay,az,gx,gy,gz,roll,pitch,yaw,T
-  - 本脚本订阅串口、过滤 $IMU, 开头的行，画 4 张实时滚动曲线：
+  - 固件按配置频率通过主串口（UART0/USB-CDC）打印 CSV：
+      $IMU1/$IMU2,t_us,ax,ay,az,gx,gy,gz,roll,pitch,yaw,T
+  - 默认只画 IMU2；--channel 1 可选择 IMU1，避免两个传感器混入同一曲线。
+    同时兼容旧版无通道标记的 $IMU 帧，画 4 张实时滚动曲线：
       1) accelerometer (g)
       2) gyroscope     (deg/s)
       3) euler         (deg)
@@ -16,6 +17,7 @@ PC 端实时绘图，配合 KneeExo 固件 profile = imu_only：
 
 用法（先 idf.py monitor 退出，把串口让出来）：
     python tools/imu_plot.py --port COM3
+    python tools/imu_plot.py --port COM3 --channel 1
 
 按 Ctrl+C 退出。
 """
@@ -33,14 +35,27 @@ import matplotlib.animation as animation
 import matplotlib.pyplot as plt
 import serial
 
-LINE_RE = re.compile(
-    r"^\$IMU,"
-    r"(?P<t>-?\d+),"
-    r"(?P<ax>-?[\d.]+),(?P<ay>-?[\d.]+),(?P<az>-?[\d.]+),"
-    r"(?P<gx>-?[\d.]+),(?P<gy>-?[\d.]+),(?P<gz>-?[\d.]+),"
-    r"(?P<roll>-?[\d.]+),(?P<pitch>-?[\d.]+),(?P<yaw>-?[\d.]+),"
-    r"(?P<T>-?[\d.]+)\s*$"
-)
+FIELDS = ["t", "ax", "ay", "az", "gx", "gy", "gz", "roll", "pitch", "yaw", "T"]
+LINE_RE = re.compile(r"^\$IMU(?P<channel>[12])?,(?P<body>.+)\s*$")
+
+
+def parse_imu(line: str, channel: int = 2) -> dict[str, int | float] | None:
+    """Parse one selected channel; old $IMU firmware has no channel tag."""
+    match = LINE_RE.match(line)
+    if not match:
+        return None
+    frame_channel = match.group("channel")
+    if frame_channel is not None and int(frame_channel) != channel:
+        return None
+    parts = match.group("body").split(",")
+    if len(parts) != len(FIELDS):
+        return None
+    try:
+        row: dict[str, int | float] = {"t": int(parts[0])}
+        row.update((name, float(value)) for name, value in zip(FIELDS[1:], parts[1:]))
+    except ValueError:
+        return None
+    return row
 
 
 class IMURingBuffer:
@@ -78,7 +93,8 @@ class IMURingBuffer:
             self.frames += 1
 
 
-def reader_thread(ser: serial.Serial, buf: IMURingBuffer, stop_evt: threading.Event):
+def reader_thread(ser: serial.Serial, buf: IMURingBuffer, stop_evt: threading.Event,
+                  channel: int = 2):
     while not stop_evt.is_set():
         try:
             raw = ser.readline()
@@ -91,30 +107,32 @@ def reader_thread(ser: serial.Serial, buf: IMURingBuffer, stop_evt: threading.Ev
             line = raw.decode("utf-8", errors="ignore").strip()
         except Exception:
             continue
-        m = LINE_RE.match(line)
-        if not m:
+        fields = parse_imu(line, channel)
+        if fields is None:
             continue
-        buf.push(m.groupdict())
+        buf.push(fields)
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", required=True, help="串口，如 COM3 / /dev/ttyUSB0")
     ap.add_argument("--baud", type=int, default=115200, help="波特率，默认 115200")
+    ap.add_argument("--channel", type=int, choices=(1, 2), default=2,
+                    help="只绘制所选 IMU 通道，默认 2（兼容旧版 $IMU 帧）")
     ap.add_argument("--window", type=int, default=400,
                     help="显示最近多少帧（默认 400 帧 ≈ 4 秒 @100Hz）")
     args = ap.parse_args()
 
-    print(f"open serial {args.port} @ {args.baud}")
+    print(f"open serial {args.port} @ {args.baud}, selected IMU{args.channel}")
     ser = serial.Serial(args.port, args.baud, timeout=0.5)
     buf = IMURingBuffer(capacity=args.window * 2)
 
     stop_evt = threading.Event()
-    th = threading.Thread(target=reader_thread, args=(ser, buf, stop_evt), daemon=True)
+    th = threading.Thread(target=reader_thread, args=(ser, buf, stop_evt, args.channel), daemon=True)
     th.start()
 
     fig, axes = plt.subplots(4, 1, figsize=(10, 8), sharex=True)
-    fig.suptitle("KneeExo IMU live plot — Ctrl+C to quit")
+    fig.suptitle(f"KneeExo IMU{args.channel} live plot (legacy $IMU accepted) — Ctrl+C to quit")
     ax_acc, ax_gyr, ax_eul, ax_T = axes
 
     def get_x(d: collections.deque):

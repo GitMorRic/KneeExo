@@ -274,7 +274,8 @@ class TelemetryBuffer:
 
     def set_control_line(self, line: str) -> None:
         with self.lock:
-            self.control_line = line[-220:]
+            # GET_PARAMS contains all calibration fields; retain its prefix and values.
+            self.control_line = line[:1024]
             if line.startswith("$ACK,GRAV_ENABLE,"):
                 parts = line.split(",", 3)
                 if len(parts) >= 3:
@@ -419,7 +420,7 @@ class SerialReader(threading.Thread):
                 if self.writer:
                     self.writer.writerow({"type": "EXO", **exo})
                 continue
-            if line.startswith("$ACK") or line.startswith("$ERR"):
+            if line.startswith(("$ACK", "$ERR", "$INFO")):
                 self.buf.set_control_line(line)
 
 
@@ -480,6 +481,8 @@ class Dashboard(QtWidgets.QMainWindow):
         button_grid = QtWidgets.QGridLayout()
         control_layout.addLayout(button_grid)
         buttons = [
+            ("Firmware info", lambda: self.send("$CMD,GET_INFO")),
+            ("Read params", lambda: self.send("$CMD,GET_PARAMS")),
             ("Zero IMU", lambda: self.send("$CMD,ZERO_IMU")),
             ("Zero Motor", lambda: self.send("$CMD,ZERO_MOTOR")),
             ("SAFE on", lambda: self.send("$CMD,SAFE,1")),

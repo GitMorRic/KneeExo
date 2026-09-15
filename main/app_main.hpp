@@ -27,6 +27,9 @@ void profile_motor_test_main(void);
 void control_task(void *arg);
 void command_task(void *arg);
 
+// Read-only identity of the running image; also printed before profile startup.
+void print_firmware_info(void);
+
 #ifdef __cplusplus
 }
 #endif

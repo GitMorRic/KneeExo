@@ -817,7 +817,9 @@ extern "C" void command_task(void *arg)
         }
 
         char *cmd = line + 5;
-        if (strcmp(cmd, "ZERO_IMU") == 0) {
+        if (strcmp(cmd, "GET_INFO") == 0) {
+            print_firmware_info();
+        } else if (strcmp(cmd, "ZERO_IMU") == 0) {
             g_req_zero_imu = true;
             printf("$ACK,REQ_ZERO_IMU\n");
         } else if (strcmp(cmd, "ZERO_MOTOR") == 0) {
@@ -927,7 +929,7 @@ extern "C" void command_task(void *arg)
                 printf("$ERR,SET_THRESH,parse_or_range\n");
             }
         } else if (strcmp(cmd, "GET_PARAMS") == 0) {
-            printf("$ACK,PARAMS,imu_zero=%.6f,motor_zero=%.6f,G=%.6f,phi=%.6f,bias=%.6f,grav_en=%d,state_ctrl=%d,state_lock=%d,impact=%.6f,swing=%.3f\n",
+            printf("$ACK,PARAMS,imu_zero=%.6f,motor_zero=%.6f,G=%.6f,phi=%.6f,bias=%.6f,grav_en=%d,state_ctrl=%d,state_lock=%d,impact=%.6f,swing=%.3f,force_safe=%d,manual_mode=%u\n",
                    g_shank_pitch_zero_deg,
                    g_user_zero_offset_rad,
                    g_gravity_G_nm,
@@ -937,7 +939,9 @@ extern "C" void command_task(void *arg)
                    g_state_impedance_enabled ? 1 : 0,
                    g_state_lock_enabled ? 1 : 0,
                    g_landing_impact_thresh_g,
-                   g_swing_rate_thresh_dps);
+                   g_swing_rate_thresh_dps,
+                   g_force_safe ? 1 : 0,
+                   (unsigned)g_manual_mode);
         } else {
             printf("$ERR,UNKNOWN,%s\n", cmd);
         }

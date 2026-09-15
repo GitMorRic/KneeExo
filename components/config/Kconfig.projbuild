@@ -10,8 +10,9 @@ menu "KneeExo Application"
         config KNEEEXO_APP_PROFILE_NORMAL
             bool "normal: IMU + RS02 motor + 100Hz control loop"
             help
-                正式形态：上电 -> 初始化 IMU + CAN + 电机 -> 立即使能 -> 100Hz 阻抗控制。
-                ⚠ 上电后电机会立刻通电，请确认硬件、限位、急停就位。
+                实验主程序：初始化 IMU + CAN，用户零位采样后自动使能电机并启动控制。
+                当前状态阻抗和重力补偿独立于 wear 子模式；transparent 不保证零力矩。
+                上电后会自动使能，请先离体台架验证，参见 docs/project-status.md。
 
         config KNEEEXO_APP_PROFILE_TWAI_LOOPBACK
             bool "twai_loopback: TWAI 自环自检 (最安全, 不接电机)"
@@ -100,10 +101,11 @@ menu "KneeExo Application"
         depends on KNEEEXO_APP_PROFILE_NORMAL
         default KNEEEXO_WEAR_MODE_TRANSPARENT
         help
-            穿戴调试模式。第一次穿戴必须先用 transparent，再尝试 damping。
+            选择叠加在状态阻抗和重力补偿上的速度项。
+            transparent 只是不叠加速度项，当前不保证零力矩；先离体验证。
 
         config KNEEEXO_WEAR_MODE_TRANSPARENT
-            bool "transparent: 0 torque command, observe joint feedback"
+            bool "transparent: no extra velocity term (FSM/gravity still active)"
 
         config KNEEEXO_WEAR_MODE_DAMPING
             bool "damping: resist joint velocity with small torque"
@@ -189,12 +191,12 @@ menu "KneeExo Application"
         depends on KNEEEXO_WEAR_MODE_ASSIST
 
     config KNEEEXO_GAIT_IMU_ENABLE
-        bool "experimental: enable IMU gait phase estimator (not used for torque yet)"
+        bool "legacy gait flag (current normal FSM runs independently)"
         depends on KNEEEXO_APP_PROFILE_NORMAL
         default n
         help
-            先实现并打印 IMU 步态相位估计，但默认关闭，不参与控制。
-            后续可用 thigh pitch / pitch rate 识别 swing / stance。
+            保留旧 profile 别名兼容性。当前 control_task 始终使用 IMU2 更新 FSM，
+            此开关不控制 FSM 或状态阻抗的执行。
 
     config KNEEEXO_GAIT_IMPACT_SPIKE_X100
         int "gait: landing impact spike threshold (g x100)"
@@ -202,7 +204,7 @@ menu "KneeExo Application"
         range 5 300
         depends on KNEEEXO_GAIT_IMU_ENABLE
         help
-            acc_norm 的高通尖刺阈值。默认 0.18g。落地瞬间通常会出现明显加速度尖刺。
+            acc_norm 的高通尖刺阈值。Kconfig 默认 0.08g；脚本或 NVS 可能覆盖。
 
     config KNEEEXO_GAIT_LANDING_COOLDOWN_MS
         int "gait: landing event cooldown (ms)"

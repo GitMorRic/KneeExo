@@ -25,7 +25,9 @@ namespace ExoConfig{
     // 1. 电池采样
     //    GPIO1 = ADC1_CH0（通道 0）
     //      ADC1_CH0=GPIO1, CH1=GPIO2, CH3=GPIO4, CH4=GPIO5 ...（见 datasheets/esp32-s3-pinout.png）
-    //    分压比：11:1（9.1kΩ + 1kΩ），48V 电池时 ADC 输入约 4.36V
+    //    软件换算比暂为 11:1；实际电阻与满充电压必须实测核对。
+    //    9.1kΩ + 1kΩ 实为 10.1:1。48V / 11 = 4.36V，不能接入此 ADC。
+    //    电源/ADC 输入范围与分压整改见 docs/specs.md；本值不是接线设计。
     // =============================================================================
     constexpr gpio_num_t  PIN_BAT_ADC         = GPIO_NUM_1;   // ADC1_CH0
     constexpr float       BAT_DIVIDER_RATIO   = 11.0f;
@@ -184,8 +186,8 @@ namespace ExoConfig{
     // 8. 小腿杆重力补偿（辨识后写入）
     //
     //    模型：
-    //      tau_link = G * sin(shank_pitch_rad + phi) + bias
-    //      tau_ff   = -tau_link
+    //      tau_ff = G * sin(shank_pitch_rad + phi) + bias
+    //    这里拟合的是关节坐标下直接施加的补偿力矩（含符号），不是待取反的负载力矩。
     //
     //    G = m * GRAVITY * l_com，单位 Nm；phi 是 IMU/杆件安装角偏置；bias 是小偏置。
     //    标定程序的角度采样点必须从 KNEE_EXT_LIMIT_RAD ~ KNEE_FLEX_LIMIT_RAD 的安全范围生成，

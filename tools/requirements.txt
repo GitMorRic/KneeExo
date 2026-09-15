@@ -1,0 +1,5 @@
+# PC dashboard and plotting tools. Install in a separate .venv.
+pyserial>=3.5,<4
+PyQt6>=6,<7
+pyqtgraph>=0.13,<1
+matplotlib>=3.8,<4

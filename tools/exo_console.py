@@ -3,7 +3,10 @@ KneeExo live console.
 
 Reads firmware telemetry lines:
   $EXO,t_us,state,shank_deg,shank_rate_dps,acc_g,knee_rad,knee_vel,
-       tau_g,tau_imp,tau_cmd,tau_fb,k,b,theta_eq,landing,flex_peak,shank_cross
+       tau_g,tau_imp,tau_cmd,tau_fb,k,b,theta_eq,landing,flex_peak,shank_cross,
+       bat_v,motor_age_ms,motor_ok,impact_g
+
+Legacy 17-, 18- and 20-field frames remain supported.
 
 Example:
   python tools/exo_console.py --port COM3 --csv logs/run.csv
@@ -45,6 +48,7 @@ FIELDS = [
     "bat_v",
     "motor_age_ms",
     "motor_ok",
+    "impact_g",
 ]
 
 LINE_RE = re.compile(r"^\$EXO,(?P<body>.+)\s*$")
@@ -74,19 +78,24 @@ def parse_exo(line: str) -> dict[str, object] | None:
     if not m:
         return None
     parts = m.group("body").split(",")
-    if len(parts) not in (17, 18, 20):
+    if len(parts) not in (17, 18, 20, 21):
         return None
 
     row: dict[str, object] = {}
-    row["t_us"] = int(parts[0])
-    row["state"] = parts[1]
-    for name, value in zip(FIELDS[2:14], parts[2:14]):
-        row[name] = float(value)
-    for name, value in zip(FIELDS[14:17], parts[14:17]):
-        row[name] = int(value)
-    row["bat_v"] = float(parts[17]) if len(parts) >= 18 else float("nan")
-    row["motor_age_ms"] = float(parts[18]) if len(parts) >= 20 else float("nan")
-    row["motor_ok"] = int(float(parts[19])) if len(parts) >= 20 else 0
+    try:
+        row["t_us"] = int(parts[0])
+        row["state"] = parts[1]
+        for name, value in zip(FIELDS[2:14], parts[2:14]):
+            row[name] = float(value)
+        for name, value in zip(FIELDS[14:17], parts[14:17]):
+            row[name] = int(value)
+        row["bat_v"] = float(parts[17]) if len(parts) >= 18 else float("nan")
+        row["motor_age_ms"] = float(parts[18]) if len(parts) >= 20 else float("nan")
+        row["motor_ok"] = int(float(parts[19])) if len(parts) >= 20 else 0
+        row["impact_g"] = float(parts[20]) if len(parts) >= 21 else float("nan")
+    except (ValueError, OverflowError):
+        # A damaged telemetry line must not terminate the serial reader thread.
+        return None
     return row
 
 
